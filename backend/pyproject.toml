@@ -7,4 +7,18 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.133.1",
     "uvicorn>=0.41.0",
+    "sqlmodel==0.0.16",
+    "asyncpg==0.29.0",
+    "psycopg2-binary==2.9.9",
+    # Auth
+    "python-jose[cryptography]==3.3.0",
+    "passlib[bcrypt]==1.7.4",
+    "bcrypt==4.0.1",
+    # Env
+    "python-dotenv==1.0.1",
+    # File uploads
+    "python-multipart==0.0.9",
+    # AI
+    "openai==1.14.3",
+    "email-validator>=2.3.0",
 ]

@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { registerUser } from '../api/auth'
+import { useAuth } from '../context/AuthContext'
 
 const EyeIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -68,16 +70,35 @@ export default function RegisterPage() {
   })
   const [showPwd, setShowPwd] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const navigate = useNavigate()
+  const { login } = useAuth()
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm({ ...form, [e.target.name]: e.target.value })
 
   const passwordsMatch = form.confirm === '' || form.password === form.confirm
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!passwordsMatch) return
-    // TODO: connect to backend
+    setError('')
+    setLoading(true)
+    try {
+      const res = await registerUser({
+        first_name: form.firstName,
+        last_name: form.lastName,
+        email: form.email,
+        password: form.password,
+      })
+      login(res.access_token)
+      navigate('/dashboard')
+    } catch (err: any) {
+      setError(err.message || 'Registration failed')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const inputBase =
@@ -138,6 +159,11 @@ export default function RegisterPage() {
         <p className="text-[0.88rem] text-[#94A3B8] m-0 mb-9">Free forever. No credit card required.</p>
 
         <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-600 text-[0.82rem] px-4 py-2.5 rounded-lg">
+              {error}
+            </div>
+          )}
           {/* Name row */}
           <div className="grid grid-cols-2 max-[480px]:grid-cols-1 gap-4">
             <div className="flex flex-col gap-[0.45rem]">
@@ -245,10 +271,10 @@ export default function RegisterPage() {
 
           <button
             type="submit"
-            disabled={!passwordsMatch}
+            disabled={!passwordsMatch || loading}
             className="h-12 bg-[#0C0C0F] text-white border-none rounded-lg text-[0.9rem] font-bold cursor-pointer tracking-[0.02em] transition-[background-color,transform] w-full mt-1 hover:bg-[#1E1E23] hover:-translate-y-px active:translate-y-0 disabled:bg-[#D1D5DB] disabled:cursor-not-allowed disabled:translate-y-0"
           >
-            Create account
+            {loading ? 'Creating account…' : 'Create account'}
           </button>
         </form>
 

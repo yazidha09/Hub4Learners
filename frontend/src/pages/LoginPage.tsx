@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { loginUser } from '../api/auth'
+import { useAuth } from '../context/AuthContext'
 
 const EyeIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -28,13 +30,27 @@ const GoogleIcon = () => (
 export default function LoginPage() {
   const [form, setForm] = useState({ email: '', password: '' })
   const [showPwd, setShowPwd] = useState(false)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const navigate = useNavigate()
+  const { login } = useAuth()
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm({ ...form, [e.target.name]: e.target.value })
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // TODO: connect to backend
+    setError('')
+    setLoading(true)
+    try {
+      const res = await loginUser({ email: form.email, password: form.password })
+      login(res.access_token)
+      navigate('/dashboard')
+    } catch (err: any) {
+      setError(err.message || 'Login failed')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -93,6 +109,11 @@ export default function LoginPage() {
         <p className="text-[0.88rem] text-[#94A3B8] m-0 mb-9">Enter your credentials to continue.</p>
 
         <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-600 text-[0.82rem] px-4 py-2.5 rounded-lg">
+              {error}
+            </div>
+          )}
           {/* Email */}
           <div className="flex flex-col gap-[0.45rem]">
             <label htmlFor="email" className="text-[0.7rem] font-bold tracking-[0.1em] uppercase text-[#374151]">Email</label>
@@ -143,9 +164,10 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            className="h-12 bg-[#0C0C0F] text-white border-none rounded-lg text-[0.9rem] font-bold cursor-pointer tracking-[0.02em] transition-[background-color,transform] w-full mt-1 hover:bg-[#1E1E23] hover:-translate-y-px active:translate-y-0"
+            disabled={loading}
+            className="h-12 bg-[#0C0C0F] text-white border-none rounded-lg text-[0.9rem] font-bold cursor-pointer tracking-[0.02em] transition-[background-color,transform] w-full mt-1 hover:bg-[#1E1E23] hover:-translate-y-px active:translate-y-0 disabled:bg-[#D1D5DB] disabled:cursor-not-allowed"
           >
-            Sign in
+            {loading ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
 
