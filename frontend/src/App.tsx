@@ -3,17 +3,19 @@ import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import DashboardPage from './pages/DashboardPage'
+import CourseLearningPage from './pages/CourseLearningPage'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import LoadingScreen from './components/LoadingScreen'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { token, loading } = useAuth()
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>
+  if (loading) return <LoadingScreen />
   return token ? <>{children}</> : <Navigate to="/login" replace />
 }
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { token, loading } = useAuth()
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>
+  if (loading) return <LoadingScreen />
   return token ? <Navigate to="/dashboard" replace /> : <>{children}</>
 }
 
@@ -26,6 +28,7 @@ export default function App() {
           <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
           <Route path="/register" element={<PublicRoute><RegisterPage /></PublicRoute>} />
           <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
+          <Route path="/learn/:courseId" element={<PrivateRoute><CourseLearningPage /></PrivateRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

@@ -10,6 +10,16 @@ export interface UserOut {
   full_name: string;
   email: string;
   role: string;
+  bio: string | null;
+  profile_image: string | null;
+}
+
+export interface UpdateProfileData {
+  full_name?: string;
+  email?: string;
+  bio?: string;
+  current_password?: string;
+  new_password?: string;
 }
 
 async function request<T>(
@@ -51,5 +61,13 @@ export function loginUser(data: { email: string; password: string }) {
 export function getMe(token: string) {
   return request<UserOut>("/auth/me", {
     headers: { Authorization: `Bearer ${token}` } as Record<string, string>,
+  });
+}
+
+export function updateProfile(token: string, data: UpdateProfileData) {
+  return request<UserOut>("/auth/profile", {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}` } as Record<string, string>,
+    body: JSON.stringify(data),
   });
 }

@@ -46,3 +46,15 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
         )
+
+
+def require_role(required: str):
+    """Returns a FastAPI dependency that enforces a specific role."""
+    def dependency(current_user: dict = Depends(get_current_user)) -> dict:
+        if current_user.get("role") != required:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access restricted to {required}s",
+            )
+        return current_user
+    return dependency

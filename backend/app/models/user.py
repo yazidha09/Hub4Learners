@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column, DateTime, String, Text, func
+from sqlalchemy import Boolean, Column, DateTime, String, Text, func
 from sqlmodel import Field, SQLModel
 
 
@@ -17,6 +17,7 @@ class User(SQLModel, table=True):
 	bio: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 	profile_image: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 	is_active: bool = Field(default=True)
+	auto_refuse_chat: bool = Field(sa_column=Column(Boolean, nullable=False, server_default='false'), default=False)
 	created_at: datetime = Field(
 		sa_column=Column(DateTime, nullable=False, server_default=func.current_timestamp())
 	)

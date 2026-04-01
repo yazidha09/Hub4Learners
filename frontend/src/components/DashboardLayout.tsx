@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
+import { updateProfile } from '../api/auth'
+import type { UpdateProfileData } from '../api/auth'
+import Modal from './Modal'
 
 export interface NavItem {
   id: string
@@ -14,16 +17,32 @@ export default function DashboardLayout({
   activeNav,
   onNavChange,
   roleLabel,
+  settingsExtra,
 }: {
   children: React.ReactNode
   navItems: NavItem[]
   activeNav: string
   onNavChange: (id: string) => void
   roleLabel: string
+  settingsExtra?: React.ReactNode
 }) {
-  const { user, logout } = useAuth()
+  const { user, token, logout, refreshUser } = useAuth()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<'profile' | 'password'>('profile')
+  const [saving, setSaving] = useState(false)
+  const [settingsMsg, setSettingsMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+
+  // Profile form state
+  const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
+  const [bio, setBio] = useState('')
+
+  // Password form state
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
 
   const initials = user?.full_name
     ?.split(' ')
@@ -35,6 +54,62 @@ export default function DashboardLayout({
   const handleLogout = () => {
     logout()
     navigate('/login')
+  }
+
+  const openSettings = () => {
+    setFullName(user?.full_name || '')
+    setEmail(user?.email || '')
+    setBio(user?.bio || '')
+    setCurrentPassword('')
+    setNewPassword('')
+    setConfirmPassword('')
+    setSettingsMsg(null)
+    setSettingsTab('profile')
+    setSettingsOpen(true)
+  }
+
+  const handleSaveProfile = async () => {
+    if (!token) return
+    setSaving(true)
+    setSettingsMsg(null)
+    try {
+      const data: UpdateProfileData = {}
+      if (fullName !== user?.full_name) data.full_name = fullName
+      if (email !== user?.email) data.email = email
+      if (bio !== (user?.bio || '')) data.bio = bio
+      await updateProfile(token, data)
+      refreshUser()
+      setSettingsMsg({ type: 'success', text: 'Profile updated successfully' })
+    } catch (err: any) {
+      setSettingsMsg({ type: 'error', text: err.message || 'Failed to update profile' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleChangePassword = async () => {
+    if (!token) return
+    if (newPassword !== confirmPassword) {
+      setSettingsMsg({ type: 'error', text: 'Passwords do not match' })
+      return
+    }
+    if (newPassword.length < 6) {
+      setSettingsMsg({ type: 'error', text: 'Password must be at least 6 characters' })
+      return
+    }
+    setSaving(true)
+    setSettingsMsg(null)
+    try {
+      await updateProfile(token, { current_password: currentPassword, new_password: newPassword })
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      setSettingsMsg({ type: 'success', text: 'Password changed successfully' })
+    } catch (err: any) {
+      setSettingsMsg({ type: 'error', text: err.message || 'Failed to change password' })
+    } finally {
+      setSaving(false)
+    }
   }
 
   const sidebar = (
@@ -78,28 +153,63 @@ export default function DashboardLayout({
             Sign out
           </button>
         </div>
+        <div className="flex items-center gap-1">
+          {/* Notifications */}
+          <button
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-white/25 hover:text-white/60 hover:bg-white/[0.06] transition-all bg-transparent border-none cursor-pointer relative"
+            title="Notifications"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </svg>
+          </button>
+          {/* Settings */}
+          <button
+            onClick={openSettings}
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-white/25 hover:text-white/60 hover:bg-white/[0.06] transition-all bg-transparent border-none cursor-pointer"
+            title="Settings"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+        </div>
       </div>
     </>
   )
 
   return (
-    <div className="min-h-screen flex bg-[#FAFAFA]">
-      <aside className="hidden md:flex w-[220px] bg-[#0C0C0F] flex-col shrink-0 h-screen sticky top-0">
+    <div className="min-h-screen flex bg-[#F6F8FB] text-[#0C0C0F]">
+      <aside className="hidden md:flex w-[230px] bg-gradient-to-b from-[#0B0C10] via-[#0E1018] to-[#0F111A] flex-col shrink-0 h-screen sticky top-0 shadow-[0_20px_60px_rgba(0,0,0,0.45)] border-r border-white/5">
         {sidebar}
       </aside>
 
       {mobileOpen && (
-        <div className="fixed inset-0 z-50 md:hidden flex">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
-          <aside className="relative w-[220px] bg-[#0C0C0F] flex flex-col h-full">{sidebar}</aside>
+        <div 
+          className="fixed inset-0 z-50 md:hidden flex"
+          style={{ animation: 'fadeIn 0.2s ease-out' }}
+        >
+          <div 
+            className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" 
+            onClick={() => setMobileOpen(false)} 
+            style={{ animation: 'fadeIn 0.2s ease-out' }}
+          />
+          <aside 
+            className="relative w-[260px] bg-gradient-to-b from-[#0B0C10] via-[#0E1018] to-[#0F111A] flex flex-col h-full shadow-2xl"
+            style={{ animation: 'slideInLeft 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }}
+          >
+            {sidebar}
+          </aside>
         </div>
       )}
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <div className="md:hidden flex items-center gap-3 px-4 py-3 bg-white border-b border-[#E5E7EB]">
+        <div className="md:hidden flex items-center gap-3 px-4 py-3 bg-white/90 backdrop-blur border-b border-[#E5E7EB] sticky top-0 z-20">
           <button
             onClick={() => setMobileOpen(true)}
-            className="w-8 h-8 flex items-center justify-center bg-transparent border-none cursor-pointer text-[#0C0C0F]"
+            className="w-9 h-9 flex items-center justify-center bg-white border border-[#E5E7EB] rounded-lg cursor-pointer text-[#0C0C0F] shadow-sm"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
@@ -109,8 +219,150 @@ export default function DashboardLayout({
           <span className="text-[0.72rem] font-bold text-[#0C0C0F] tracking-[0.08em] uppercase">H4L</span>
         </div>
 
-        <main className="flex-1 overflow-y-auto">{children}</main>
+        <main className="flex-1 overflow-y-auto relative">
+          <div className="relative z-[1]">{children}</div>
+        </main>
       </div>
+
+      {/* Settings Modal */}
+      <Modal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} title="Settings" size="lg">
+        {/* Tabs */}
+        <div className="flex gap-1 mb-6 bg-[#F1F3F5] rounded-lg p-1">
+          <button
+            onClick={() => { setSettingsTab('profile'); setSettingsMsg(null) }}
+            className={`flex-1 py-2 text-[0.8rem] font-medium rounded-md transition-all border-none cursor-pointer ${
+              settingsTab === 'profile'
+                ? 'bg-white text-[#0C0C0F] shadow-sm'
+                : 'bg-transparent text-[#94A3B8] hover:text-[#0C0C0F]'
+            }`}
+          >
+            Profile
+          </button>
+          <button
+            onClick={() => { setSettingsTab('password'); setSettingsMsg(null) }}
+            className={`flex-1 py-2 text-[0.8rem] font-medium rounded-md transition-all border-none cursor-pointer ${
+              settingsTab === 'password'
+                ? 'bg-white text-[#0C0C0F] shadow-sm'
+                : 'bg-transparent text-[#94A3B8] hover:text-[#0C0C0F]'
+            }`}
+          >
+            Password
+          </button>
+        </div>
+
+        {/* Status message */}
+        {settingsMsg && (
+          <div className={`mb-4 px-4 py-2.5 rounded-lg text-[0.82rem] font-medium ${
+            settingsMsg.type === 'success'
+              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+              : 'bg-red-50 text-red-700 border border-red-200'
+          }`}>
+            {settingsMsg.text}
+          </div>
+        )}
+
+        {settingsTab === 'profile' && (
+          <div className="flex flex-col gap-4">
+            {/* Avatar preview */}
+            <div className="flex items-center gap-4 mb-2">
+              <div className="w-14 h-14 rounded-full bg-[#0C0C0F] text-white flex items-center justify-center text-[1rem] font-semibold uppercase shrink-0">
+                {initials}
+              </div>
+              <div>
+                <div className="text-[0.88rem] font-semibold text-[#0C0C0F]">{user?.full_name}</div>
+                <div className="text-[0.72rem] text-[#94A3B8] capitalize">{user?.role}</div>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[0.7rem] font-semibold text-[#94A3B8] uppercase tracking-wide mb-1.5">Full Name</label>
+              <input
+                type="text"
+                value={fullName}
+                onChange={e => setFullName(e.target.value)}
+                className="w-full h-10 px-3 border border-[#E5E7EB] rounded-lg text-[0.85rem] text-[#0C0C0F] outline-none transition-shadow focus:shadow-[0_0_0_3px_rgba(12,12,15,0.07)]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[0.7rem] font-semibold text-[#94A3B8] uppercase tracking-wide mb-1.5">Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                className="w-full h-10 px-3 border border-[#E5E7EB] rounded-lg text-[0.85rem] text-[#0C0C0F] outline-none transition-shadow focus:shadow-[0_0_0_3px_rgba(12,12,15,0.07)]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[0.7rem] font-semibold text-[#94A3B8] uppercase tracking-wide mb-1.5">Bio</label>
+              <textarea
+                value={bio}
+                onChange={e => setBio(e.target.value)}
+                rows={3}
+                placeholder="Tell us about yourself..."
+                className="w-full px-3 py-2.5 border border-[#E5E7EB] rounded-lg text-[0.85rem] text-[#0C0C0F] outline-none transition-shadow focus:shadow-[0_0_0_3px_rgba(12,12,15,0.07)] resize-none"
+              />
+            </div>
+
+            {settingsExtra && (
+              <div className="pt-2 mt-2 border-t border-[#E5E7EB]">
+                {settingsExtra}
+              </div>
+            )}
+
+            <button
+              onClick={handleSaveProfile}
+              disabled={saving}
+              className="mt-2 h-10 bg-[#0C0C0F] text-white text-[0.82rem] font-medium rounded-lg hover:bg-[#1E1E23] transition-colors disabled:bg-[#D1D5DB] disabled:cursor-not-allowed border-none cursor-pointer"
+            >
+              {saving ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        )}
+
+        {settingsTab === 'password' && (
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="block text-[0.7rem] font-semibold text-[#94A3B8] uppercase tracking-wide mb-1.5">Current Password</label>
+              <input
+                type="password"
+                value={currentPassword}
+                onChange={e => setCurrentPassword(e.target.value)}
+                className="w-full h-10 px-3 border border-[#E5E7EB] rounded-lg text-[0.85rem] text-[#0C0C0F] outline-none transition-shadow focus:shadow-[0_0_0_3px_rgba(12,12,15,0.07)]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[0.7rem] font-semibold text-[#94A3B8] uppercase tracking-wide mb-1.5">New Password</label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={e => setNewPassword(e.target.value)}
+                className="w-full h-10 px-3 border border-[#E5E7EB] rounded-lg text-[0.85rem] text-[#0C0C0F] outline-none transition-shadow focus:shadow-[0_0_0_3px_rgba(12,12,15,0.07)]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[0.7rem] font-semibold text-[#94A3B8] uppercase tracking-wide mb-1.5">Confirm New Password</label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                className="w-full h-10 px-3 border border-[#E5E7EB] rounded-lg text-[0.85rem] text-[#0C0C0F] outline-none transition-shadow focus:shadow-[0_0_0_3px_rgba(12,12,15,0.07)]"
+              />
+            </div>
+
+            <button
+              onClick={handleChangePassword}
+              disabled={saving || !currentPassword || !newPassword || !confirmPassword}
+              className="mt-2 h-10 bg-[#0C0C0F] text-white text-[0.82rem] font-medium rounded-lg hover:bg-[#1E1E23] transition-colors disabled:bg-[#D1D5DB] disabled:cursor-not-allowed border-none cursor-pointer"
+            >
+              {saving ? 'Changing...' : 'Change Password'}
+            </button>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }
