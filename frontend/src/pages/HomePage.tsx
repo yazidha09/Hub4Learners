@@ -278,7 +278,6 @@ export default function HomePage() {
                     to="/register"
                     className="card-soft p-5 flex flex-col items-center text-center no-underline text-[#0C0C0F] hover:-translate-y-1 hover:shadow-[0_12px_40px_rgba(0,0,0,0.1)] transition-all duration-300"
                   >
-                    <span className="text-2xl mb-3">{cat.icon}</span>
                     <h3 className="text-[0.9rem] font-bold mb-1">{cat.name}</h3>
                     <p className="text-[0.78rem] text-[#64748B]">{cat.course_count} course{cat.course_count !== 1 ? 's' : ''}</p>
                   </Link>

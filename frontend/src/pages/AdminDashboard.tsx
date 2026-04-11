@@ -1,14 +1,21 @@
 import { useState, useEffect, useRef } from 'react'
-import { useAuth } from '../context/AuthContext'
+import { useAuth, hasMinRank, ROLE_RANK, type UserRole } from '../context/AuthContext'
 import DashboardLayout, { type NavItem } from '../components/DashboardLayout'
-import { listUpgradeRequests, reviewUpgradeRequest, type UpgradeRequestOut } from '../api/upgrade'
 import {
   getStats, listUsers, changeUserRole, deleteUser,
   listAllCourses, adminTogglePublish, adminDeleteCourse,
-  type AdminUser, type PlatformStats,
+  type AdminUser, type PlatformStats, ROLE_LABELS, ALL_ROLES,
 } from '../api/admin'
+import {
+  listRegions, createRegion, deleteRegion,
+  listUniversities, createUniversity, deleteUniversity,
+  createRegionalAdmin, createUniversityAdmin, createProfessor,
+  listJoinRequests, reviewJoinRequest,
+  type RegionOut, type UniversityOut, type JoinRequestOut,
+} from '../api/org'
 import { listCategories, createCategory, updateCategory, deleteCategory, type CategoryOut } from '../api/category'
 import type { CourseOut } from '../api/course'
+import { listVerifications, reviewVerification, type ProfVerificationOut } from '../api/prof_verification'
 
 /* ── Icons ── */
 const HomeIcon = () => (
@@ -36,40 +43,119 @@ const TagIcon = () => (
     <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><line x1="7" y1="7" x2="7.01" y2="7" />
   </svg>
 )
+const OrgIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="5" r="2" /><path d="M12 7v4" /><path d="M8 13H4a2 2 0 0 0-2 2v2h8" /><path d="M16 13h4a2 2 0 0 1 2 2v2h-8" /><circle cx="12" cy="15" r="2" /><circle cx="5" cy="19" r="2" /><circle cx="19" cy="19" r="2" />
+  </svg>
+)
 
-const NAV: NavItem[] = [
-  { id: 'home', label: 'Overview', icon: <HomeIcon /> },
-  { id: 'users', label: 'Users', icon: <UsersIcon /> },
-  { id: 'courses', label: 'Courses', icon: <BookIcon /> },
-  { id: 'categories', label: 'Categories', icon: <TagIcon /> },
-  { id: 'upgrades', label: 'Upgrade Requests', icon: <ShieldIcon /> },
+const ALL_NAV: NavItem[] = [
+  { id: 'home',             label: 'Overview',              icon: <HomeIcon /> },
+  { id: 'org',              label: 'Organization',          icon: <OrgIcon /> },
+  { id: 'users',            label: 'Users',                 icon: <UsersIcon /> },
+  { id: 'courses',          label: 'Courses',               icon: <BookIcon /> },
+  { id: 'categories',       label: 'Categories',            icon: <TagIcon /> },
+  { id: 'prof-verif',       label: 'Prof. Verifications',   icon: <ShieldIcon /> },
 ]
 
-const ROLE_COLORS: Record<string, string> = {
-  student: 'text-slate-500',
-  professor: 'text-[#FF5533]',
-  admin: 'text-blue-600',
+// Which nav items each role may see
+const NAV_ALLOW: Record<string, string[]> = {
+  super_admin:      ['home', 'org', 'users', 'categories', 'prof-verif'],
+  regional_admin:   ['home', 'org', 'users', 'courses', 'prof-verif'],
+  university_admin: ['home', 'org', 'users', 'courses'],
 }
 
-const STATUS_STYLES: Record<string, { bg: string; text: string; border: string; dot: string }> = {
-  pending: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', dot: 'bg-amber-500' },
-  approved: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', dot: 'bg-emerald-500' },
-  rejected: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200', dot: 'bg-red-500' },
+function getNav(role: string): NavItem[] {
+  const allowed = NAV_ALLOW[role] ?? ['home', 'users']
+  return ALL_NAV.filter(n => allowed.includes(n.id))
+}
+
+const ROLE_COLORS: Record<string, string> = {
+  student:          'text-slate-500',
+  professor:        'text-[#FF5533]',
+  university_admin: 'text-blue-600',
+  regional_admin:   'text-violet-600',
+  super_admin:      'text-emerald-600',
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
    OVERVIEW PANEL
    ════════════════════════════════════════════════════════════════════════════ */
 
-function OverviewPanel({ token, onNav }: { token: string; onNav: (id: string) => void }) {
+function OverviewPanel({ token, userRole, universityName, regionName, onNav }: {
+  token: string
+  userRole: string
+  universityName: string | null
+  regionName: string | null
+  onNav: (id: string) => void
+}) {
+  const isSuperAdmin = userRole === 'super_admin'
   const [stats, setStats] = useState<PlatformStats | null>(null)
   const [recentUsers, setRecentUsers] = useState<AdminUser[]>([])
 
   useEffect(() => {
-    getStats(token).then(setStats).catch(() => {})
+    if (isSuperAdmin) getStats(token).then(setStats).catch(() => {})
     listUsers(token).then(u => setRecentUsers(u.slice(0, 6))).catch(() => {})
   }, [token])
 
+  // ── Scoped overview for regional / university admins ──────────────────────
+  if (!isSuperAdmin) {
+    const scopeLabel = userRole === 'regional_admin'
+      ? `Region: ${regionName ?? 'Your Region'}`
+      : `University: ${universityName ?? 'Your University'}${regionName ? ` · ${regionName}` : ''}`
+
+    const quickActions = userRole === 'regional_admin'
+      ? [{ label: 'Manage Universities', nav: 'org' }, { label: 'Manage Users', nav: 'users' }, { label: 'Prof. Verifications', nav: 'prof-verif' }]
+      : [{ label: 'Create Professors', nav: 'org' }, { label: 'View Courses', nav: 'courses' }, { label: 'Manage Users', nav: 'users' }]
+
+    return (
+      <div className="max-w-[1020px] mx-auto px-6 md:px-10 py-8">
+        {/* Scoped hero */}
+        <div className="mb-8 relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#0F172A] via-[#111827] to-[#0B0F1F] text-white shadow-[0_25px_80px_rgba(15,23,42,0.35)] border border-white/10">
+          <div className="absolute -right-12 -top-12 w-48 h-48 bg-[#FF5533]/20 blur-3xl rounded-full" />
+          <div className="relative p-6 sm:p-8">
+            <p className="text-[0.7rem] font-bold tracking-[0.16em] uppercase text-white/60 mb-1">{ROLE_LABEL_MAP[userRole]}</p>
+            <h1 className="text-[1.75rem] font-black tracking-[-0.03em]">Welcome back</h1>
+            <p className="text-white/60 text-[0.9rem] mt-1">{scopeLabel}</p>
+            <div className="flex flex-wrap gap-3 mt-5">
+              {quickActions.map(a => (
+                <button key={a.nav} onClick={() => onNav(a.nav)}
+                  className="h-10 px-5 rounded-xl bg-white/10 border border-white/20 text-white text-sm font-semibold cursor-pointer hover:bg-white/20 transition-all">
+                  {a.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Recent users in scope */}
+        <h2 className="text-[0.68rem] font-bold tracking-[0.12em] uppercase text-[#94A3B8] mb-4">
+          Recent users {userRole === 'regional_admin' ? 'in your region' : 'in your university'}
+        </h2>
+        <div className="bg-white border border-[#E5E7EB] rounded-xl overflow-x-auto shadow-[0_16px_44px_rgba(12,12,15,0.06)]">
+          <div className="min-w-[500px]">
+            <div className="grid grid-cols-[1fr_1fr_90px_100px] gap-2 px-5 py-3 border-b border-[#F1F3F5] text-[0.62rem] font-bold tracking-[0.1em] uppercase text-[#94A3B8]">
+              <span>Name</span><span>Email</span><span className="text-center">Role</span><span className="text-right">Joined</span>
+            </div>
+            {recentUsers.length === 0 ? (
+              <div className="px-5 py-8 text-center text-sm text-slate-400">No users in scope yet.</div>
+            ) : recentUsers.map(u => (
+              <div key={u.id} className="grid grid-cols-[1fr_1fr_90px_100px] gap-2 px-5 py-3 border-b last:border-b-0 border-[#F1F3F5] items-center hover:bg-[#FAFAFA] transition-colors">
+                <span className="text-[0.84rem] font-semibold text-[#0C0C0F] truncate">{u.full_name}</span>
+                <span className="text-[0.78rem] text-[#94A3B8] truncate">{u.email}</span>
+                <span className="text-center">
+                  <span className={`text-[0.62rem] font-bold uppercase tracking-[0.08em] ${ROLE_COLORS[u.role] || 'text-slate-400'}`}>{ROLE_LABELS[u.role] ?? u.role}</span>
+                </span>
+                <span className="text-right text-[0.73rem] text-[#94A3B8]">{new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Super admin full overview ─────────────────────────────────────────────
   const statCards = stats
     ? [
         { label: 'Total Users', value: stats.total_users.toLocaleString() },
@@ -86,11 +172,13 @@ function OverviewPanel({ token, onNav }: { token: string; onNav: (id: string) =>
 
   const pcts = stats
     ? {
-        students: stats.total_users ? Math.round((stats.total_students / stats.total_users) * 100) : 0,
-        professors: stats.total_users ? Math.round((stats.total_professors / stats.total_users) * 100) : 0,
-        admins: stats.total_users ? Math.round((stats.total_admins / stats.total_users) * 100) : 0,
+        students:          stats.total_users ? Math.round((stats.total_students / stats.total_users) * 100) : 0,
+        professors:        stats.total_users ? Math.round((stats.total_professors / stats.total_users) * 100) : 0,
+        university_admins: stats.total_users ? Math.round(((stats.total_university_admins ?? 0) / stats.total_users) * 100) : 0,
+        regional_admins:   stats.total_users ? Math.round(((stats.total_regional_admins ?? 0) / stats.total_users) * 100) : 0,
+        super_admins:      stats.total_users ? Math.round(((stats.total_super_admins ?? 0) / stats.total_users) * 100) : 0,
       }
-    : { students: 0, professors: 0, admins: 0 }
+    : { students: 0, professors: 0, university_admins: 0, regional_admins: 0, super_admins: 0 }
 
   return (
     <div className="max-w-[1020px] mx-auto px-6 md:px-10 py-8">
@@ -104,12 +192,12 @@ function OverviewPanel({ token, onNav }: { token: string; onNav: (id: string) =>
               <p className="text-[0.7rem] font-bold tracking-[0.16em] uppercase text-white/70 mb-1">Administration</p>
               <h1 className="text-[1.9rem] font-black tracking-[-0.03em] leading-tight">Platform overview</h1>
               <p className="text-white/70 text-[0.95rem] max-w-xl mt-2">
-                Manage users, courses, categories, and upgrade requests from one control center.
+                Manage users, courses, categories, and professor verifications from one control center.
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <button onClick={() => onNav('upgrades')} className="h-11 px-5 rounded-xl bg-white text-[#0C0C0F] font-semibold text-[0.9rem] border-none cursor-pointer shadow-md hover:-translate-y-0.5 transition-all">
-                Review upgrades
+              <button onClick={() => onNav('prof-verif')} className="h-11 px-5 rounded-xl bg-white text-[#0C0C0F] font-semibold text-[0.9rem] border-none cursor-pointer shadow-md hover:-translate-y-0.5 transition-all">
+                Prof. verifications
               </button>
               <button onClick={() => onNav('users')} className="h-11 px-5 rounded-xl border border-white/40 text-white/90 font-semibold text-[0.9rem] bg-white/10 backdrop-blur cursor-pointer hover:border-white/70 transition-all">
                 Manage users
@@ -146,7 +234,7 @@ function OverviewPanel({ token, onNav }: { token: string; onNav: (id: string) =>
                   <span className="text-[0.84rem] font-semibold text-[#0C0C0F] truncate">{u.full_name}</span>
                   <span className="text-[0.78rem] text-[#94A3B8] truncate">{u.email}</span>
                   <span className="text-center">
-                    <span className={`text-[0.62rem] font-bold uppercase tracking-[0.08em] ${ROLE_COLORS[u.role] || 'text-slate-400'}`}>{u.role}</span>
+                    <span className={`text-[0.62rem] font-bold uppercase tracking-[0.08em] ${ROLE_COLORS[u.role] || 'text-slate-400'}`}>{ROLE_LABELS[u.role] ?? u.role}</span>
                   </span>
                   <span className="text-right text-[0.73rem] text-[#94A3B8]">{new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                 </div>
@@ -163,13 +251,17 @@ function OverviewPanel({ token, onNav }: { token: string; onNav: (id: string) =>
             <div className="flex h-2 rounded-full overflow-hidden mb-3">
               <div style={{ width: `${pcts.students}%`, background: '#0C0C0F' }} />
               <div style={{ width: `${pcts.professors}%`, background: '#FF5533' }} />
-              <div style={{ width: `${pcts.admins}%`, background: '#94A3B8' }} />
+              <div style={{ width: `${pcts.university_admins}%`, background: '#3B82F6' }} />
+              <div style={{ width: `${pcts.regional_admins}%`, background: '#7C3AED' }} />
+              <div style={{ width: `${pcts.super_admins}%`, background: '#10B981' }} />
             </div>
             <div className="flex flex-col gap-2">
               {[
-                { label: 'Students', pct: pcts.students, color: '#0C0C0F' },
-                { label: 'Professors', pct: pcts.professors, color: '#FF5533' },
-                { label: 'Admins', pct: pcts.admins, color: '#94A3B8' },
+                { label: 'Students',          pct: pcts.students,          color: '#0C0C0F' },
+                { label: 'Professors',         pct: pcts.professors,        color: '#FF5533' },
+                { label: 'Univ. Admins',       pct: pcts.university_admins, color: '#3B82F6' },
+                { label: 'Regional Admins',    pct: pcts.regional_admins,   color: '#7C3AED' },
+                { label: 'Super Admins',       pct: pcts.super_admins,      color: '#10B981' },
               ].map(r => (
                 <div key={r.label} className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -186,12 +278,7 @@ function OverviewPanel({ token, onNav }: { token: string; onNav: (id: string) =>
           <div className="bg-white border border-[#E5E7EB] rounded-xl shadow-[0_16px_44px_rgba(12,12,15,0.06)] p-5">
             <h2 className="text-[0.68rem] font-bold tracking-[0.12em] uppercase text-[#94A3B8] mb-4">Quick actions</h2>
             <div className="flex flex-col gap-2">
-              {[
-                { label: 'Manage Users', nav: 'users' },
-                { label: 'Manage Courses', nav: 'courses' },
-                { label: 'Manage Categories', nav: 'categories' },
-                { label: 'Review Upgrades', nav: 'upgrades' },
-              ].map(a => (
+              {getNav(userRole).filter(n => n.id !== 'home').map(n => ({ label: n.label, nav: n.id })).map(a => (
                 <button
                   key={a.nav}
                   onClick={() => onNav(a.nav)}
@@ -215,7 +302,7 @@ function OverviewPanel({ token, onNav }: { token: string; onNav: (id: string) =>
    USERS PANEL
    ════════════════════════════════════════════════════════════════════════════ */
 
-function UsersPanel({ token }: { token: string }) {
+function UsersPanel({ token, userRole }: { token: string; userRole: string }) {
   const [users, setUsers] = useState<AdminUser[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -223,6 +310,10 @@ function UsersPanel({ token }: { token: string }) {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [err, setErr] = useState('')
+
+  // Only show roles that this actor can assign (rank strictly below their own)
+  const myRank = ROLE_RANK[userRole as UserRole] ?? 0
+  const assignableRoles = ALL_ROLES.filter(r => (ROLE_RANK[r as UserRole] ?? 0) < myRank)
 
   const load = () => {
     setLoading(true)
@@ -278,8 +369,8 @@ function UsersPanel({ token }: { token: string }) {
             className="w-full h-11 pl-12 pr-4 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100 transition-all"
           />
         </form>
-        <div className="flex gap-2">
-          {['', 'student', 'professor', 'admin'].map(r => (
+        <div className="flex flex-wrap gap-2">
+          {(['', ...assignableRoles] as string[]).map(r => (
             <button
               key={r}
               onClick={() => setRoleFilter(r)}
@@ -288,7 +379,7 @@ function UsersPanel({ token }: { token: string }) {
                   ? 'bg-slate-900 text-white border-slate-900'
                   : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
               }`}
-            >{r || 'All'}</button>
+            >{r ? (ROLE_LABELS[r] ?? r) : 'All'}</button>
           ))}
         </div>
       </div>
@@ -334,9 +425,9 @@ function UsersPanel({ token }: { token: string }) {
                       disabled={actionLoading === u.id}
                       className={`text-[0.7rem] font-bold uppercase tracking-wide bg-transparent border-none outline-none cursor-pointer ${ROLE_COLORS[u.role] || 'text-slate-400'}`}
                     >
-                      <option value="student">Student</option>
-                      <option value="professor">Professor</option>
-                      <option value="admin">Admin</option>
+                      {assignableRoles.map(r => (
+                        <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                      ))}
                     </select>
                   </div>
                   <span className="text-center text-xs text-slate-400">{new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
@@ -389,7 +480,8 @@ function UsersPanel({ token }: { token: string }) {
    COURSES PANEL
    ════════════════════════════════════════════════════════════════════════════ */
 
-function CoursesPanel({ token }: { token: string }) {
+function CoursesPanel({ token, userRole }: { token: string; userRole: string }) {
+  const canDelete = userRole !== 'university_admin'
   const [courses, setCourses] = useState<CourseOut[]>([])
   const [categories, setCategories] = useState<CategoryOut[]>([])
   const [activeCat, setActiveCat] = useState('')
@@ -461,7 +553,7 @@ function CoursesPanel({ token }: { token: string }) {
               className={`px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all ${
                 activeCat === cat.id ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
               }`}
-            >{cat.icon} {cat.name}</button>
+            >{cat.name}</button>
           ))}
         </div>
       )}
@@ -538,7 +630,7 @@ function CoursesPanel({ token }: { token: string }) {
                 >
                   {c.is_published ? 'Published' : 'Draft'}
                 </button>
-                {confirmDelete === c.id ? (
+                {canDelete && (confirmDelete === c.id ? (
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => handleDelete(c.id)}
@@ -567,7 +659,7 @@ function CoursesPanel({ token }: { token: string }) {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
                     </svg>
                   </button>
-                )}
+                ))}
               </div>
             </div>
           ))}
@@ -588,7 +680,6 @@ function CategoriesPanel({ token }: { token: string }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [formName, setFormName] = useState('')
   const [formDesc, setFormDesc] = useState('')
-  const [formIcon, setFormIcon] = useState('📚')
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
@@ -603,14 +694,13 @@ function CategoriesPanel({ token }: { token: string }) {
 
   const resetForm = () => {
     setShowForm(false); setEditingId(null)
-    setFormName(''); setFormDesc(''); setFormIcon('📚')
+    setFormName(''); setFormDesc('')
   }
 
   const startEdit = (cat: CategoryOut) => {
     setEditingId(cat.id)
     setFormName(cat.name)
     setFormDesc(cat.description || '')
-    setFormIcon(cat.icon)
     setShowForm(true)
   }
 
@@ -623,14 +713,12 @@ function CategoriesPanel({ token }: { token: string }) {
         const updated = await updateCategory(token, editingId, {
           name: formName.trim(),
           description: formDesc.trim() || undefined,
-          icon: formIcon,
         })
         setCategories(prev => prev.map(c => c.id === editingId ? updated : c))
       } else {
         const created = await createCategory(token, {
           name: formName.trim(),
           description: formDesc.trim() || undefined,
-          icon: formIcon,
         })
         setCategories(prev => [...prev, created])
       }
@@ -648,8 +736,6 @@ function CategoriesPanel({ token }: { token: string }) {
     } catch (e: any) { setErr(e.message) }
     finally { setActionLoading(null) }
   }
-
-  const EMOJI_OPTIONS = ['📚', '🔬', '📐', '💻', '⚙️', '🌍', '📊', '🎨', '🏥', '📖', '🎯', '🧪', '🎓', '📝', '🏗️', '🌐', '🧠', '🎵']
 
   return (
     <div className="max-w-[700px] animate-fadeIn">
@@ -685,21 +771,6 @@ function CategoriesPanel({ token }: { token: string }) {
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.06)] p-6 mb-6 animate-fadeIn">
           <h3 className="text-sm font-semibold text-slate-900 mb-4">{editingId ? 'Edit category' : 'New category'}</h3>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Icon</label>
-              <div className="flex flex-wrap gap-2">
-                {EMOJI_OPTIONS.map(e => (
-                  <button
-                    key={e}
-                    type="button"
-                    onClick={() => setFormIcon(e)}
-                    className={`w-10 h-10 rounded-xl text-lg flex items-center justify-center border-2 transition-all cursor-pointer ${
-                      formIcon === e ? 'border-slate-900 bg-slate-100' : 'border-slate-100 bg-white hover:border-slate-300'
-                    }`}
-                  >{e}</button>
-                ))}
-              </div>
-            </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Name <span className="text-red-500">*</span></label>
               <input
@@ -746,7 +817,6 @@ function CategoriesPanel({ token }: { token: string }) {
         <div className="space-y-2 stagger-children">
           {categories.map(cat => (
             <div key={cat.id} className="bg-white rounded-xl border border-slate-200/80 shadow-[0_1px_6px_rgba(0,0,0,0.04)] px-5 py-4 flex items-center gap-4 hover:shadow-[0_4px_16px_rgba(0,0,0,0.08)] transition-all">
-              <span className="text-2xl">{cat.icon}</span>
               <div className="flex-1 min-w-0">
                 <h3 className="text-sm font-semibold text-slate-900">{cat.name}</h3>
                 <p className="text-xs text-slate-400 truncate">{cat.description || 'No description'}</p>
@@ -803,41 +873,501 @@ function CategoriesPanel({ token }: { token: string }) {
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
-   UPGRADE REQUESTS PANEL (preserved from original)
+   ORGANIZATION PANEL
    ════════════════════════════════════════════════════════════════════════════ */
 
-function UpgradeRequestsPanel({ token }: { token: string }) {
-  const [requests, setRequests] = useState<UpgradeRequestOut[]>([])
+function OrgPanel({ token, userRole, userRegionId }: { token: string; userRole: string; userRegionId: string | null }) {
+  // super_admin → regions, regional_admin → universities, university_admin → professors
+  const [tab, setTab] = useState<'regions' | 'universities' | 'admins' | 'professors' | 'join-requests'>(
+    userRole === 'super_admin' ? 'regions' : userRole === 'university_admin' ? 'professors' : 'universities'
+  )
+  const [regions, setRegions] = useState<RegionOut[]>([])
+  const [universities, setUniversities] = useState<UniversityOut[]>([])
   const [loading, setLoading] = useState(true)
-  const [rejectingId, setRejectingId] = useState<string | null>(null)
-  const [rejectNotes, setRejectNotes] = useState('')
+  const [err, setErr] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+
+  // Region form
+  const [showRegionForm, setShowRegionForm] = useState(false)
+  const [regionName, setRegionName] = useState('')
+  const [regionCode, setRegionCode] = useState('')
+  const [savingRegion, setSavingRegion] = useState(false)
+
+  // University form
+  const [showUniForm, setShowUniForm] = useState(false)
+  const [uniName, setUniName] = useState('')
+  // regional_admin is locked to their own region; others can pick from dropdown
+  const [uniRegionId, setUniRegionId] = useState(userRole === 'regional_admin' ? (userRegionId ?? '') : '')
+  const [savingUni, setSavingUni] = useState(false)
+
+  // Admin creation form
+  // super_admin can create both types; regional_admin can only create university admins
+  const [adminType, setAdminType] = useState<'regional' | 'university'>(
+    userRole === 'super_admin' ? 'regional' : 'university'
+  )
+  const [adminForm, setAdminForm] = useState({ full_name: '', email: '', password: '', region_id: '', university_id: '' })
+  const [savingAdmin, setSavingAdmin] = useState(false)
+  const [adminSuccess, setAdminSuccess] = useState('')
+
+  // Professor creation form (university_admin)
+  const [profForm, setProfForm] = useState({ full_name: '', email: '', password: '' })
+  const [savingProf, setSavingProf] = useState(false)
+  const [profSuccess, setProfSuccess] = useState('')
+
+  // Join requests (university_admin)
+  const [joinRequests, setJoinRequests] = useState<JoinRequestOut[]>([])
+  const [reviewingReq, setReviewingReq] = useState<string | null>(null)
+
+  const isSuperAdmin = userRole === 'super_admin'
+  const isRegionalAdmin = userRole === 'regional_admin'
+  const isUniversityAdmin = userRole === 'university_admin'
+
+  useEffect(() => {
+    setLoading(true)
+    const loads: Promise<any>[] = [
+      listRegions(token).then(setRegions).catch(() => {}),
+    ]
+    if (isSuperAdmin || isRegionalAdmin) {
+      loads.push(listUniversities(token).then(setUniversities).catch(() => {}))
+    }
+    if (isUniversityAdmin) {
+      loads.push(listJoinRequests(token).then(setJoinRequests).catch(() => {}))
+    }
+    Promise.all(loads).finally(() => setLoading(false))
+  }, [token])
+
+  const handleCreateRegion = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!regionName.trim()) return
+    setSavingRegion(true); setErr('')
+    try {
+      const r = await createRegion(token, { name: regionName.trim(), code: regionCode.trim() || undefined })
+      setRegions(prev => [...prev, r])
+      setRegionName(''); setRegionCode(''); setShowRegionForm(false)
+    } catch (e: any) { setErr(e.message) }
+    finally { setSavingRegion(false) }
+  }
+
+  const handleDeleteRegion = async (id: string) => {
+    setErr('')
+    try {
+      await deleteRegion(token, id)
+      setRegions(prev => prev.filter(r => r.id !== id))
+      setConfirmDelete(null)
+    } catch (e: any) { setErr(e.message) }
+  }
+
+  const handleCreateUni = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!uniName.trim() || !uniRegionId) return
+    setSavingUni(true); setErr('')
+    try {
+      const u = await createUniversity(token, { name: uniName.trim(), region_id: uniRegionId })
+      setUniversities(prev => [...prev, u])
+      setUniName(''); setUniRegionId(''); setShowUniForm(false)
+    } catch (e: any) { setErr(e.message) }
+    finally { setSavingUni(false) }
+  }
+
+  const handleDeleteUni = async (id: string) => {
+    setErr('')
+    try {
+      await deleteUniversity(token, id)
+      setUniversities(prev => prev.filter(u => u.id !== id))
+      setConfirmDelete(null)
+    } catch (e: any) { setErr(e.message) }
+  }
+
+  const handleCreateAdmin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSavingAdmin(true); setErr(''); setAdminSuccess('')
+    try {
+      if (adminType === 'regional') {
+        await createRegionalAdmin(token, { ...adminForm, region_id: adminForm.region_id })
+      } else {
+        await createUniversityAdmin(token, { ...adminForm, university_id: adminForm.university_id })
+      }
+      setAdminSuccess(`${adminType === 'regional' ? 'Regional' : 'University'} admin created successfully`)
+      setAdminForm({ full_name: '', email: '', password: '', region_id: '', university_id: '' })
+    } catch (e: any) { setErr(e.message) }
+    finally { setSavingAdmin(false) }
+  }
+
+  const handleCreateProfessor = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSavingProf(true); setErr(''); setProfSuccess('')
+    try {
+      // university_id is resolved server-side from the JWT for university_admin
+      await createProfessor(token, { ...profForm })
+      setProfSuccess('Professor account created successfully')
+      setProfForm({ full_name: '', email: '', password: '' })
+    } catch (e: any) { setErr(e.message) }
+    finally { setSavingProf(false) }
+  }
+
+  const handleReviewJoinRequest = async (id: string, action: 'approve' | 'reject') => {
+    setReviewingReq(id); setErr('')
+    try {
+      await reviewJoinRequest(token, id, action)
+      setJoinRequests(prev => prev.filter(r => r.id !== id))
+    } catch (e: any) { setErr(e.message) }
+    finally { setReviewingReq(null) }
+  }
+
+  const tabs = [
+    { id: 'regions' as const,      label: 'Regions',          show: isSuperAdmin },
+    { id: 'universities' as const, label: 'Universities',     show: isSuperAdmin || isRegionalAdmin },
+    { id: 'admins' as const,       label: 'Create Admins',    show: isSuperAdmin || isRegionalAdmin },
+    { id: 'professors' as const,   label: 'Create Professor', show: isUniversityAdmin },
+    { id: 'join-requests' as const, label: `Join Requests${joinRequests.length ? ` (${joinRequests.length})` : ''}`, show: isUniversityAdmin },
+  ].filter(t => t.show)
+
+  return (
+    <div className="max-w-[860px] animate-fadeIn">
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Organization</h2>
+        <p className="text-sm text-slate-500 mt-1">Manage regions, universities, and admin accounts</p>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 mb-6 p-1 bg-slate-100 rounded-xl w-fit">
+        {tabs.map(t => (
+          <button
+            key={t.id}
+            onClick={() => { setTab(t.id); setErr('') }}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+              tab === t.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >{t.label}</button>
+        ))}
+      </div>
+
+      {err && (
+        <div className="flex items-center gap-3 p-4 mb-5 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600">
+          <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+          </svg>
+          {err}
+        </div>
+      )}
+
+      {/* ── Regions Tab ── */}
+      {tab === 'regions' && (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm text-slate-500">{regions.length} region{regions.length !== 1 ? 's' : ''}</p>
+            {!showRegionForm && (
+              <button onClick={() => setShowRegionForm(true)}
+                className="h-9 px-4 rounded-xl bg-slate-900 text-white text-sm font-semibold border-none cursor-pointer hover:bg-slate-800 transition-colors flex items-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+                New region
+              </button>
+            )}
+          </div>
+
+          {showRegionForm && (
+            <form onSubmit={handleCreateRegion} className="bg-white rounded-2xl border border-slate-200 p-5 mb-5 space-y-3">
+              <h3 className="text-sm font-semibold text-slate-900">New region</h3>
+              <input value={regionName} onChange={e => setRegionName(e.target.value)} placeholder="Region name *"
+                className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100" />
+              <input value={regionCode} onChange={e => setRegionCode(e.target.value)} placeholder="Region code (optional, e.g. NE)"
+                className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100" />
+              <div className="flex gap-2 pt-1">
+                <button type="button" onClick={() => { setShowRegionForm(false); setRegionName(''); setRegionCode('') }}
+                  className="flex-1 h-9 rounded-lg text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 border-none cursor-pointer">Cancel</button>
+                <button type="submit" disabled={!regionName.trim() || savingRegion}
+                  className="flex-1 h-9 rounded-lg text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed border-none cursor-pointer">
+                  {savingRegion ? 'Creating...' : 'Create'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {loading ? (
+            <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-14 rounded-xl skeleton" />)}</div>
+          ) : regions.length === 0 ? (
+            <div className="text-center py-14 bg-white rounded-2xl border border-dashed border-slate-200">
+              <p className="text-sm font-semibold text-slate-900">No regions yet</p>
+              <p className="text-xs text-slate-400 mt-1">Create your first region above</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {regions.map(r => (
+                <div key={r.id} className="bg-white rounded-xl border border-slate-200 px-5 py-4 flex items-center gap-4 hover:shadow-sm transition-all">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">{r.name}</p>
+                    <p className="text-xs text-slate-400">{r.code ? `Code: ${r.code} · ` : ''}{r.university_count} universit{r.university_count !== 1 ? 'ies' : 'y'}</p>
+                  </div>
+                  {confirmDelete === r.id ? (
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => handleDeleteRegion(r.id)}
+                        className="w-7 h-7 rounded-lg bg-red-500 text-white flex items-center justify-center border-none cursor-pointer hover:bg-red-600">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+                      </button>
+                      <button onClick={() => setConfirmDelete(null)}
+                        className="w-7 h-7 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center border-none cursor-pointer hover:bg-slate-200">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setConfirmDelete(r.id)}
+                      className="w-7 h-7 rounded-lg bg-white border border-slate-200 text-slate-400 flex items-center justify-center cursor-pointer hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-all">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Universities Tab ── */}
+      {tab === 'universities' && (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm text-slate-500">{universities.length} universit{universities.length !== 1 ? 'ies' : 'y'}</p>
+            {!showUniForm && (
+              <button onClick={() => setShowUniForm(true)}
+                className="h-9 px-4 rounded-xl bg-slate-900 text-white text-sm font-semibold border-none cursor-pointer hover:bg-slate-800 flex items-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+                New university
+              </button>
+            )}
+          </div>
+
+          {showUniForm && (
+            <form onSubmit={handleCreateUni} className="bg-white rounded-2xl border border-slate-200 p-5 mb-5 space-y-3">
+              <h3 className="text-sm font-semibold text-slate-900">New university</h3>
+              <input value={uniName} onChange={e => setUniName(e.target.value)} placeholder="University name *"
+                className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100" />
+              {isRegionalAdmin ? (
+                <div className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm bg-slate-50 text-slate-500 flex items-center">
+                  {regions.find(r => r.id === uniRegionId)?.name ?? 'Your region'}
+                </div>
+              ) : (
+                <select value={uniRegionId} onChange={e => setUniRegionId(e.target.value)}
+                  className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 bg-white">
+                  <option value="">Select region *</option>
+                  {regions.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+              )}
+              <div className="flex gap-2 pt-1">
+                <button type="button" onClick={() => { setShowUniForm(false); setUniName(''); setUniRegionId(isRegionalAdmin ? (userRegionId ?? '') : '') }}
+                  className="flex-1 h-9 rounded-lg text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 border-none cursor-pointer">Cancel</button>
+                <button type="submit" disabled={!uniName.trim() || !uniRegionId || savingUni}
+                  className="flex-1 h-9 rounded-lg text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed border-none cursor-pointer">
+                  {savingUni ? 'Creating...' : 'Create'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {loading ? (
+            <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-14 rounded-xl skeleton" />)}</div>
+          ) : universities.length === 0 ? (
+            <div className="text-center py-14 bg-white rounded-2xl border border-dashed border-slate-200">
+              <p className="text-sm font-semibold text-slate-900">No universities yet</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {universities.map(u => (
+                <div key={u.id} className="bg-white rounded-xl border border-slate-200 px-5 py-4 flex items-center gap-4 hover:shadow-sm transition-all">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">{u.name}</p>
+                    <p className="text-xs text-slate-400">Region: {u.region_name ?? u.region_id}</p>
+                  </div>
+                  {confirmDelete === u.id ? (
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => handleDeleteUni(u.id)}
+                        className="w-7 h-7 rounded-lg bg-red-500 text-white flex items-center justify-center border-none cursor-pointer hover:bg-red-600">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+                      </button>
+                      <button onClick={() => setConfirmDelete(null)}
+                        className="w-7 h-7 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center border-none cursor-pointer hover:bg-slate-200">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setConfirmDelete(u.id)}
+                      className="w-7 h-7 rounded-lg bg-white border border-slate-200 text-slate-400 flex items-center justify-center cursor-pointer hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-all">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Create Professor Tab (university_admin) ── */}
+      {tab === 'professors' && (
+        <div className="max-w-[520px]">
+          {profSuccess && (
+            <div className="flex items-center gap-3 p-4 mb-4 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-700">
+              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+              {profSuccess}
+            </div>
+          )}
+          <form onSubmit={handleCreateProfessor} className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+            <h3 className="text-sm font-semibold text-slate-900">Create Professor Account</h3>
+            <p className="text-xs text-slate-500">The professor will be automatically assigned to your university.</p>
+            <div className="space-y-3">
+              <input value={profForm.full_name} onChange={e => setProfForm(p => ({ ...p, full_name: e.target.value }))}
+                placeholder="Full name *"
+                className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100" />
+              <input value={profForm.email} onChange={e => setProfForm(p => ({ ...p, email: e.target.value }))}
+                placeholder="Email address *" type="email"
+                className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100" />
+              <input value={profForm.password} onChange={e => setProfForm(p => ({ ...p, password: e.target.value }))}
+                placeholder="Password *" type="password"
+                className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100" />
+            </div>
+            <button type="submit" disabled={savingProf || !profForm.full_name.trim() || !profForm.email.trim() || !profForm.password.trim()}
+              className="w-full h-10 rounded-xl text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed border-none cursor-pointer transition-all">
+              {savingProf ? 'Creating...' : 'Create professor account'}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* ── Join Requests Tab (university_admin) ── */}
+      {tab === 'join-requests' && (
+        <div>
+          {joinRequests.length === 0 ? (
+            <div className="text-center py-14 bg-white rounded-2xl border border-dashed border-slate-200">
+              <p className="text-sm font-semibold text-slate-900">No pending requests</p>
+              <p className="text-xs text-slate-400 mt-1">Professors who request to join your university will appear here.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {joinRequests.map(req => (
+                <div key={req.id} className="bg-white rounded-xl border border-slate-200 px-5 py-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-900">{req.professor_name ?? req.professor_id}</p>
+                      {req.note && (
+                        <p className="text-xs text-slate-500 mt-0.5 italic">"{req.note}"</p>
+                      )}
+                      <p className="text-xs text-slate-400 mt-1">{new Date(req.created_at).toLocaleDateString()}</p>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        onClick={() => handleReviewJoinRequest(req.id, 'approve')}
+                        disabled={reviewingReq === req.id}
+                        className="h-8 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold border-none cursor-pointer disabled:opacity-50 transition-colors"
+                      >
+                        {reviewingReq === req.id ? '...' : 'Approve'}
+                      </button>
+                      <button
+                        onClick={() => handleReviewJoinRequest(req.id, 'reject')}
+                        disabled={reviewingReq === req.id}
+                        className="h-8 px-3 rounded-lg bg-white border border-slate-200 text-slate-600 hover:border-red-300 hover:text-red-600 text-xs font-semibold cursor-pointer disabled:opacity-50 transition-colors"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Create Admin Tab ── */}
+      {tab === 'admins' && (
+        <div className="max-w-[520px]">
+          {/* Type toggle */}
+          {isSuperAdmin && (
+            <div className="flex gap-2 mb-5">
+              {(['regional', 'university'] as const).map(t => (
+                <button key={t} onClick={() => setAdminType(t)}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-all ${
+                    adminType === t ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
+                  }`}>
+                  {t === 'regional' ? 'Regional Admin' : 'University Admin'}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {adminSuccess && (
+            <div className="flex items-center gap-3 p-4 mb-4 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-700">
+              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+              {adminSuccess}
+            </div>
+          )}
+
+          <form onSubmit={handleCreateAdmin} className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+            <h3 className="text-sm font-semibold text-slate-900">
+              Create {adminType === 'regional' ? 'Regional' : 'University'} Admin
+            </h3>
+            <div className="space-y-3">
+              <input value={adminForm.full_name} onChange={e => setAdminForm(p => ({ ...p, full_name: e.target.value }))}
+                placeholder="Full name *"
+                className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100" />
+              <input value={adminForm.email} onChange={e => setAdminForm(p => ({ ...p, email: e.target.value }))}
+                placeholder="Email address *" type="email"
+                className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100" />
+              <input value={adminForm.password} onChange={e => setAdminForm(p => ({ ...p, password: e.target.value }))}
+                placeholder="Password *" type="password"
+                className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100" />
+
+              {adminType === 'regional' && (
+                <select value={adminForm.region_id} onChange={e => setAdminForm(p => ({ ...p, region_id: e.target.value }))}
+                  className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 bg-white">
+                  <option value="">Assign to region *</option>
+                  {regions.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+              )}
+
+              {adminType === 'university' && (
+                <select value={adminForm.university_id} onChange={e => setAdminForm(p => ({ ...p, university_id: e.target.value }))}
+                  className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 bg-white">
+                  <option value="">Assign to university *</option>
+                  {universities.map(u => <option key={u.id} value={u.id}>{u.name} ({u.region_name})</option>)}
+                </select>
+              )}
+            </div>
+
+            <button type="submit" disabled={savingAdmin}
+              className="w-full h-10 rounded-xl text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed border-none cursor-pointer transition-all">
+              {savingAdmin ? 'Creating...' : 'Create admin account'}
+            </button>
+          </form>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   PROFESSOR VERIFICATION PANEL
+   ════════════════════════════════════════════════════════════════════════════ */
+
+function ProfVerificationPanel({ token }: { token: string }) {
+  const [requests, setRequests] = useState<ProfVerificationOut[]>([])
+  const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
 
   useEffect(() => {
-    listUpgradeRequests(token).then(setRequests).finally(() => setLoading(false))
+    listVerifications(token).then(setRequests).finally(() => setLoading(false))
   }, [token])
 
-  const handleApprove = async (id: string) => {
+  const handleAction = async (id: string, action: 'approve' | 'reject') => {
     setActionLoading(id)
     try {
-      const updated = await reviewUpgradeRequest(token, id, 'approve')
+      const updated = await reviewVerification(token, id, action)
       setRequests(prev => prev.map(r => r.id === id ? updated : r))
-    } finally { setActionLoading(null) }
-  }
-
-  const handleReject = async (id: string) => {
-    setActionLoading(id)
-    try {
-      const updated = await reviewUpgradeRequest(token, id, 'reject', rejectNotes)
-      setRequests(prev => prev.map(r => r.id === id ? updated : r))
-      setRejectingId(null); setRejectNotes('')
     } finally { setActionLoading(null) }
   }
 
   if (loading) {
     return (
       <div className="space-y-4">
-        {[...Array(3)].map((_, i) => <div key={i} className="h-40 rounded-2xl skeleton" />)}
+        {[...Array(3)].map((_, i) => <div key={i} className="h-36 rounded-2xl skeleton" />)}
       </div>
     )
   }
@@ -847,134 +1377,78 @@ function UpgradeRequestsPanel({ token }: { token: string }) {
       <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-200">
         <div className="w-14 h-14 mx-auto mb-4 bg-slate-100 rounded-2xl flex items-center justify-center">
           <svg className="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
           </svg>
         </div>
-        <p className="text-base font-semibold text-slate-900 mb-1">No upgrade requests</p>
-        <p className="text-sm text-slate-500">Requests from students will appear here</p>
+        <p className="text-base font-semibold text-slate-900 mb-1">No verification requests</p>
+        <p className="text-sm text-slate-500">Pending requests from independent professors will appear here</p>
       </div>
     )
   }
 
   return (
-    <div className="space-y-4 stagger-children">
+    <div className="space-y-4">
       {requests.map(req => {
-        const status = STATUS_STYLES[req.status] || STATUS_STYLES.pending
+        const isPending = req.status === 'pending'
+        const statusStyle =
+          req.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+          req.status === 'rejected' ? 'bg-red-50 text-red-700 border-red-200' :
+          'bg-amber-50 text-amber-700 border-amber-200'
+
         return (
-          <div key={req.id} className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] overflow-hidden transition-all duration-300 hover:shadow-[0_4px_20px_rgba(0,0,0,0.08)]">
+          <div key={req.id} className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] overflow-hidden">
             <div className="flex items-center justify-between p-5 border-b border-slate-100">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-slate-100 to-slate-50 flex items-center justify-center text-lg font-bold text-slate-600">
-                  {req.user_full_name.charAt(0).toUpperCase()}
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 flex items-center justify-center text-lg font-bold text-amber-700 border border-amber-100">
+                  {(req.professor_name || '?').charAt(0).toUpperCase()}
                 </div>
                 <div>
-                  <p className="font-semibold text-slate-900">{req.user_full_name}</p>
-                  <p className="text-sm text-slate-500">{req.user_email}</p>
+                  <p className="font-semibold text-slate-900">{req.professor_name}</p>
+                  <p className="text-sm text-slate-500">Region: {req.region_name || '—'}</p>
                 </div>
               </div>
-              <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold ${status.bg} ${status.text} ${status.border}`}>
-                <span className={`w-2 h-2 rounded-full ${status.dot}`} />
+              <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold ${statusStyle}`}>
                 {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
               </span>
             </div>
 
-            <div className="p-5">
-              <div className="flex items-center gap-3 mb-4 flex-wrap">
-                {req.cin_path && (
-                  <a href={`http://localhost:8000/uploads/${req.cin_path}`} target="_blank" rel="noreferrer"
-                    className="inline-flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-600 rounded-lg text-xs font-semibold hover:bg-blue-100 transition-colors">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z" />
-                    </svg>
-                    View CIN
-                  </a>
-                )}
-                {req.diploma_path && (
-                  <a href={`http://localhost:8000/uploads/${req.diploma_path}`} target="_blank" rel="noreferrer"
-                    className="inline-flex items-center gap-2 px-3 py-2 bg-purple-50 text-purple-600 rounded-lg text-xs font-semibold hover:bg-purple-100 transition-colors">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5" />
-                    </svg>
-                    View Diploma
-                  </a>
-                )}
-                <span className="text-xs text-slate-400 flex items-center gap-1.5">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  {new Date(req.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                </span>
+            <div className="p-5 grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+              <div>
+                <p className="text-[0.68rem] font-bold uppercase tracking-wide text-slate-400 mb-0.5">First name</p>
+                <p className="font-medium text-slate-800">{req.first_name}</p>
               </div>
-
-              {req.message && (
-                <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-xl mb-4">
-                  <svg className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
-                  </svg>
-                  <p className="text-sm text-slate-600 leading-relaxed italic">"{req.message}"</p>
-                </div>
-              )}
-
-              {req.reviewer_notes && (
-                <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-100 rounded-xl mb-4">
-                  <svg className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
-                  </svg>
-                  <div>
-                    <p className="text-xs font-semibold text-amber-700 mb-1">Admin note</p>
-                    <p className="text-sm text-amber-800">{req.reviewer_notes}</p>
-                  </div>
-                </div>
-              )}
-
-              {req.status === 'pending' && (
-                <div className="pt-2">
-                  {rejectingId === req.id ? (
-                    <div className="space-y-3 animate-fadeIn">
-                      <textarea
-                        value={rejectNotes}
-                        onChange={e => setRejectNotes(e.target.value)}
-                        placeholder="Reason for rejection (optional)..."
-                        rows={3}
-                        className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 resize-none outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100 transition-all"
-                      />
-                      <div className="flex gap-3">
-                        <button onClick={() => handleReject(req.id)} disabled={actionLoading === req.id}
-                          className="flex items-center gap-2 px-4 py-2.5 bg-red-500 text-white text-sm font-semibold rounded-xl border-none cursor-pointer hover:bg-red-600 transition-all disabled:opacity-50 shadow-lg shadow-red-500/25">
-                          {actionLoading === req.id ? (
-                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
-                          ) : (
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                          )}
-                          Confirm rejection
-                        </button>
-                        <button onClick={() => { setRejectingId(null); setRejectNotes('') }}
-                          className="px-4 py-2.5 bg-white text-slate-600 text-sm font-semibold rounded-xl border border-slate-200 cursor-pointer hover:border-slate-400 hover:bg-slate-50 transition-all">
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex gap-3">
-                      <button onClick={() => handleApprove(req.id)} disabled={actionLoading === req.id}
-                        className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500 text-white text-sm font-semibold rounded-xl border-none cursor-pointer hover:bg-emerald-600 hover:-translate-y-0.5 transition-all disabled:opacity-50 shadow-lg shadow-emerald-500/25">
-                        {actionLoading === req.id ? (
-                          <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
-                        ) : (
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
-                        )}
-                        Approve
-                      </button>
-                      <button onClick={() => setRejectingId(req.id)}
-                        className="flex items-center gap-2 px-5 py-2.5 bg-white text-red-500 text-sm font-semibold rounded-xl border border-red-200 cursor-pointer hover:bg-red-50 hover:border-red-300 transition-all">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                        Reject
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
+              <div>
+                <p className="text-[0.68rem] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Father's name</p>
+                <p className="font-medium text-slate-800">{req.father_name}</p>
+              </div>
+              <div>
+                <p className="text-[0.68rem] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Grandfather's name</p>
+                <p className="font-medium text-slate-800">{req.grandfather_name}</p>
+              </div>
+              <div>
+                <p className="text-[0.68rem] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Date of birth</p>
+                <p className="font-medium text-slate-800">{new Date(req.birth_date).toLocaleDateString()}</p>
+              </div>
             </div>
+
+            {isPending && (
+              <div className="px-5 pb-5 flex gap-3">
+                <button
+                  onClick={() => handleAction(req.id, 'approve')}
+                  disabled={actionLoading === req.id}
+                  className="h-9 px-5 rounded-xl bg-emerald-500 text-white text-sm font-semibold border-none cursor-pointer hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {actionLoading === req.id ? '...' : 'Approve'}
+                </button>
+                <button
+                  onClick={() => handleAction(req.id, 'reject')}
+                  disabled={actionLoading === req.id}
+                  className="h-9 px-5 rounded-xl bg-red-50 text-red-600 border border-red-200 text-sm font-semibold cursor-pointer hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {actionLoading === req.id ? '...' : 'Reject'}
+                </button>
+              </div>
+            )}
           </div>
         )
       })}
@@ -986,12 +1460,28 @@ function UpgradeRequestsPanel({ token }: { token: string }) {
    MAIN ADMIN DASHBOARD
    ════════════════════════════════════════════════════════════════════════════ */
 
+const ROLE_LABEL_MAP: Record<string, string> = {
+  super_admin:      'Super Admin',
+  regional_admin:   'Regional Admin',
+  university_admin: 'Univ. Admin',
+  professor:        'Professor',
+  student:          'Student',
+}
+
 export default function AdminDashboard() {
-  const { token } = useAuth()
-  const [nav, setNav] = useState('home')
+  const { token, user } = useAuth()
+  const role = user?.role ?? ''
+  const nav_items = getNav(role)
+  const [nav, setNav] = useState(nav_items[0]?.id ?? 'home')
+
+  const roleLabel = ROLE_LABEL_MAP[role] ?? 'Admin'
+
+  // Guard: redirect nav if the current panel is not allowed for this role
+  const allowedIds = nav_items.map(n => n.id)
+  const activeNav = allowedIds.includes(nav) ? nav : (nav_items[0]?.id ?? 'home')
 
   const wrapper = (title: string, subtitle: string, children: React.ReactNode) => (
-    <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Admin">
+    <DashboardLayout navItems={nav_items} activeNav={activeNav} onNavChange={setNav} roleLabel={roleLabel}>
       <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
         <div className="mb-7">
           <p className="text-[0.7rem] font-bold tracking-[0.12em] uppercase text-[#FF5533] mb-1">Administration</p>
@@ -1003,35 +1493,60 @@ export default function AdminDashboard() {
     </DashboardLayout>
   )
 
-  if (nav === 'home') {
+  if (activeNav === 'home') {
     return (
-      <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Admin">
-        <OverviewPanel token={token!} onNav={setNav} />
+      <DashboardLayout navItems={nav_items} activeNav={activeNav} onNavChange={setNav} roleLabel={roleLabel}>
+        <OverviewPanel
+          token={token!}
+          userRole={role}
+          universityName={user?.university_name ?? null}
+          regionName={user?.region_name ?? null}
+          onNav={setNav}
+        />
       </DashboardLayout>
     )
   }
 
-  if (nav === 'users') {
-    return wrapper('Users', 'Manage all platform users, change roles, or remove accounts.', <UsersPanel token={token!} />)
+  if (activeNav === 'org') {
+    const orgSubtitle = role === 'university_admin'
+      ? 'Create professor accounts for your university.'
+      : 'Manage regions, universities, and admin accounts.'
+    return wrapper('Organization', orgSubtitle, <OrgPanel token={token!} userRole={role} userRegionId={user?.region_id ?? null} />)
   }
 
-  if (nav === 'courses') {
-    return wrapper('Courses', 'View all courses, toggle publish status, or remove them.', <CoursesPanel token={token!} />)
+  if (activeNav === 'users') {
+    const scopeNote = role === 'regional_admin'
+      ? `Users in ${user?.region_name ?? 'your region'}`
+      : role === 'university_admin'
+        ? `Users in ${user?.university_name ?? 'your university'}`
+        : 'Manage all platform users, change roles, or remove accounts.'
+    return wrapper('Users', scopeNote, <UsersPanel token={token!} userRole={role} />)
   }
 
-  if (nav === 'categories') {
+  if (activeNav === 'courses') {
+    const courseSubtitle = role === 'university_admin'
+      ? 'View and manage courses from professors in your university.'
+      : 'View all courses, toggle publish status, or remove them.'
+    return wrapper('Courses', courseSubtitle, <CoursesPanel token={token!} userRole={role} />)
+  }
+
+  if (activeNav === 'categories') {
     return wrapper('Categories', 'Create and manage course categories.', <CategoriesPanel token={token!} />)
   }
 
-  if (nav === 'upgrades') {
-    return wrapper('Upgrade requests', 'Review professor upgrade requests from students.', <UpgradeRequestsPanel token={token!} />)
+  if (activeNav === 'prof-verif') {
+    return wrapper(
+      'Professor Verifications',
+      'Review civil identity verification requests from independent professors.',
+      <ProfVerificationPanel token={token!} />
+    )
   }
 
   return (
-    <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Admin">
+    <DashboardLayout navItems={nav_items} activeNav={activeNav} onNavChange={setNav} roleLabel={roleLabel}>
       <div className="flex-1 flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
-          <h2 className="text-[1.1rem] font-bold text-[#0C0C0F]">{NAV.find(n => n.id === nav)?.label}</h2>
+          <h2 className="text-[1.1rem] font-bold text-[#0C0C0F]">{nav_items.find(n => n.id === activeNav)?.label}</h2>
           <p className="text-[0.82rem] text-[#94A3B8] mt-1">Coming soon</p>
         </div>
       </div>

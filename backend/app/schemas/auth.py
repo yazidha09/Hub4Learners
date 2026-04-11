@@ -8,6 +8,7 @@ class RegisterRequest(BaseModel):
     last_name: str
     email: EmailStr
     password: str
+    role: str = "student"   # "student" or "professor"
 
 
 class LoginRequest(BaseModel):
@@ -25,8 +26,13 @@ class UserOut(BaseModel):
     full_name: str
     email: str
     role: str
+    is_verified: bool = True
     bio: Optional[str] = None
     profile_image: Optional[str] = None
+    university_id: Optional[str] = None
+    region_id: Optional[str] = None
+    university_name: Optional[str] = None
+    region_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -38,3 +44,4 @@ class UpdateProfileRequest(BaseModel):
     bio: Optional[str] = None
     current_password: Optional[str] = None
     new_password: Optional[str] = None
+    university_id: Optional[str] = None   # set to "" or "null" to unlink

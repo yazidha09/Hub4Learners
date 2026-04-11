@@ -60,7 +60,68 @@ function PasswordStrength({ password }: { password: string }) {
   )
 }
 
+/* ── Role Picker Step ── */
+function RolePicker({ onSelect }: { onSelect: (role: 'student' | 'professor') => void }) {
+  return (
+    <div className="p-6 sm:p-8">
+      <p className="text-xs font-semibold tracking-wider uppercase text-[#FF5533] mb-2">Get started</p>
+      <h2 className="text-3xl font-bold tracking-tight text-slate-900 mb-2">Join Hub4Learners</h2>
+      <p className="text-sm text-slate-500 mb-8">Who are you joining as?</p>
+
+      <div className="grid grid-cols-2 gap-4">
+        <button
+          type="button"
+          onClick={() => onSelect('student')}
+          className="flex flex-col items-center gap-3 p-6 border-2 border-slate-200 rounded-2xl bg-white hover:border-slate-900 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-pointer text-left"
+        >
+          <span className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-2xl">
+            🎓
+          </span>
+          <div>
+            <p className="text-[0.95rem] font-bold text-slate-900">Student</p>
+            <p className="text-[0.8rem] text-slate-500 mt-0.5">Browse and enroll in courses</p>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onSelect('professor')}
+          className="flex flex-col items-center gap-3 p-6 border-2 border-slate-200 rounded-2xl bg-white hover:border-[#FF5533] hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 cursor-pointer text-left"
+        >
+          <span className="w-12 h-12 rounded-xl bg-orange-50 flex items-center justify-center text-2xl">
+            📚
+          </span>
+          <div>
+            <p className="text-[0.95rem] font-bold text-slate-900">Professor</p>
+            <p className="text-[0.8rem] text-slate-500 mt-0.5">Create and publish courses</p>
+          </div>
+        </button>
+      </div>
+
+      {/* Professor notice */}
+      <div className="mt-5 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+        <p className="text-[0.8rem] text-amber-800 leading-relaxed">
+          <span className="font-semibold">Joining as a professor?</span> You can create draft courses immediately.
+          To publish, you'll need verification from a region admin — a quick one-time process.
+        </p>
+      </div>
+
+      <p className="text-center text-sm text-slate-500 mt-6">
+        Already have an account?{' '}
+        <Link
+          to="/login"
+          className="text-slate-900 font-semibold no-underline border-b border-b-slate-900 pb-[0.5px] transition-colors hover:text-[#FF5533] hover:border-b-[#FF5533]"
+        >
+          Sign in
+        </Link>
+      </p>
+    </div>
+  )
+}
+
 export default function RegisterPage() {
+  const [step, setStep] = useState<'pick-role' | 'form'>('pick-role')
+  const [role, setRole] = useState<'student' | 'professor'>('student')
   const [form, setForm] = useState({
     firstName: '',
     lastName: '',
@@ -74,6 +135,11 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
   const { login } = useAuth()
+
+  const handleRoleSelect = (r: 'student' | 'professor') => {
+    setRole(r)
+    setStep('form')
+  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm({ ...form, [e.target.name]: e.target.value })
@@ -91,6 +157,7 @@ export default function RegisterPage() {
         last_name: form.lastName,
         email: form.email,
         password: form.password,
+        role,
       })
       login(res.access_token)
       navigate('/dashboard')
@@ -148,162 +215,186 @@ export default function RegisterPage() {
       {/* Right panel */}
       <div className="bg-[#F6F8FB] flex flex-col justify-center py-12 px-6 sm:px-10 lg:px-12">
         <div className="max-w-[520px] w-full mx-auto card-soft">
-          <div className="p-6 sm:p-8">
-            <p className="text-xs font-semibold tracking-wider uppercase text-[#FF5533] mb-2">Get started</p>
-            <h2 className="text-3xl font-bold tracking-tight text-slate-900 mb-2">Create account</h2>
-            <p className="text-sm text-slate-500 mb-8">Free forever. No credit card required.</p>
 
-            <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
-              {error && (
-                <div className="flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 animate-fadeIn">
-                  <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+          {/* Step 1 — Role picker */}
+          {step === 'pick-role' && <RolePicker onSelect={handleRoleSelect} />}
+
+          {/* Step 2 — Registration form */}
+          {step === 'form' && (
+            <div className="p-6 sm:p-8">
+              {/* Back + role badge */}
+              <div className="flex items-center gap-3 mb-5">
+                <button
+                  type="button"
+                  onClick={() => setStep('pick-role')}
+                  className="flex items-center gap-1 text-[0.82rem] text-slate-500 hover:text-slate-900 transition-colors border-none bg-transparent cursor-pointer p-0"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="15 18 9 12 15 6" />
                   </svg>
-                  {error}
-                </div>
-              )}
-              <div className="grid grid-cols-2 max-[480px]:grid-cols-1 gap-4">
-                <div className="flex flex-col gap-2">
-                  <label htmlFor="firstName" className="text-xs font-semibold tracking-wider uppercase text-slate-600">First name</label>
-                  <input
-                    id="firstName"
-                    type="text"
-                    name="firstName"
-                    placeholder="John"
-                    value={form.firstName}
-                    onChange={handleChange}
-                    required
-                    autoComplete="given-name"
-                    className={inputBase}
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <label htmlFor="lastName" className="text-xs font-semibold tracking-wider uppercase text-slate-600">Last name</label>
-                  <input
-                    id="lastName"
-                    type="text"
-                    name="lastName"
-                    placeholder="Doe"
-                    value={form.lastName}
-                    onChange={handleChange}
-                    required
-                    autoComplete="family-name"
-                    className={inputBase}
-                  />
-                </div>
+                  Back
+                </button>
+                <span className={`px-3 py-1 rounded-full text-[0.75rem] font-bold border ${role === 'professor' ? 'bg-orange-50 text-[#FF5533] border-orange-200' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                  {role === 'professor' ? '📚 Professor' : '🎓 Student'}
+                </span>
               </div>
 
-              <div className="flex flex-col gap-2">
-                <label htmlFor="email" className="text-xs font-semibold tracking-wider uppercase text-slate-600">Email</label>
-                <input
-                  id="email"
-                  type="email"
-                  name="email"
-                  placeholder="you@example.com"
-                  value={form.email}
-                  onChange={handleChange}
-                  required
-                  autoComplete="email"
-                  className={inputBase}
-                />
-              </div>
+              <p className="text-xs font-semibold tracking-wider uppercase text-[#FF5533] mb-2">Get started</p>
+              <h2 className="text-3xl font-bold tracking-tight text-slate-900 mb-2">Create account</h2>
+              <p className="text-sm text-slate-500 mb-8">Free forever. No credit card required.</p>
 
-              <div className="flex flex-col gap-2">
-                <label htmlFor="password" className="text-xs font-semibold tracking-wider uppercase text-slate-600">Password</label>
-                <div className="relative flex items-center">
-                  <input
-                    id="password"
-                    type={showPwd ? 'text' : 'password'}
-                    name="password"
-                    placeholder="Min. 8 characters"
-                    value={form.password}
-                    onChange={handleChange}
-                    required
-                    minLength={8}
-                    autoComplete="new-password"
-                    className={`${inputBase} pr-12`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPwd(v => !v)}
-                    aria-label={showPwd ? 'Hide password' : 'Show password'}
-                    className="absolute right-4 bg-transparent border-none p-0 cursor-pointer text-slate-400 flex items-center transition-colors hover:text-slate-900"
-                  >
-                    {showPwd ? <EyeOffIcon /> : <EyeIcon />}
-                  </button>
-                </div>
-                <PasswordStrength password={form.password} />
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <label htmlFor="confirm" className="text-xs font-semibold tracking-wider uppercase text-slate-600">Confirm password</label>
-                <div className="relative flex items-center">
-                  <input
-                    id="confirm"
-                    type={showConfirm ? 'text' : 'password'}
-                    name="confirm"
-                    placeholder="Repeat your password"
-                    value={form.confirm}
-                    onChange={handleChange}
-                    required
-                    autoComplete="new-password"
-                    className={`${inputBase} pr-12 ${!passwordsMatch ? 'border-red-400 ring-4 ring-red-100' : ''}`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirm(v => !v)}
-                    aria-label={showConfirm ? 'Hide password' : 'Show password'}
-                    className="absolute right-4 bg-transparent border-none p-0 cursor-pointer text-slate-400 flex items-center transition-colors hover:text-slate-900"
-                  >
-                    {showConfirm ? <EyeOffIcon /> : <EyeIcon />}
-                  </button>
-                </div>
-                {!passwordsMatch && (
-                  <span className="text-xs text-red-500">Passwords do not match</span>
+              <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
+                {error && (
+                  <div className="flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 animate-fadeIn">
+                    <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                    </svg>
+                    {error}
+                  </div>
                 )}
+                <div className="grid grid-cols-2 max-[480px]:grid-cols-1 gap-4">
+                  <div className="flex flex-col gap-2">
+                    <label htmlFor="firstName" className="text-xs font-semibold tracking-wider uppercase text-slate-600">First name</label>
+                    <input
+                      id="firstName"
+                      type="text"
+                      name="firstName"
+                      placeholder="John"
+                      value={form.firstName}
+                      onChange={handleChange}
+                      required
+                      autoComplete="given-name"
+                      className={inputBase}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label htmlFor="lastName" className="text-xs font-semibold tracking-wider uppercase text-slate-600">Last name</label>
+                    <input
+                      id="lastName"
+                      type="text"
+                      name="lastName"
+                      placeholder="Doe"
+                      value={form.lastName}
+                      onChange={handleChange}
+                      required
+                      autoComplete="family-name"
+                      className={inputBase}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="email" className="text-xs font-semibold tracking-wider uppercase text-slate-600">Email</label>
+                  <input
+                    id="email"
+                    type="email"
+                    name="email"
+                    placeholder="you@example.com"
+                    value={form.email}
+                    onChange={handleChange}
+                    required
+                    autoComplete="email"
+                    className={inputBase}
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="password" className="text-xs font-semibold tracking-wider uppercase text-slate-600">Password</label>
+                  <div className="relative flex items-center">
+                    <input
+                      id="password"
+                      type={showPwd ? 'text' : 'password'}
+                      name="password"
+                      placeholder="Min. 8 characters"
+                      value={form.password}
+                      onChange={handleChange}
+                      required
+                      minLength={8}
+                      autoComplete="new-password"
+                      className={`${inputBase} pr-12`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPwd(v => !v)}
+                      aria-label={showPwd ? 'Hide password' : 'Show password'}
+                      className="absolute right-4 bg-transparent border-none p-0 cursor-pointer text-slate-400 flex items-center transition-colors hover:text-slate-900"
+                    >
+                      {showPwd ? <EyeOffIcon /> : <EyeIcon />}
+                    </button>
+                  </div>
+                  <PasswordStrength password={form.password} />
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <label htmlFor="confirm" className="text-xs font-semibold tracking-wider uppercase text-slate-600">Confirm password</label>
+                  <div className="relative flex items-center">
+                    <input
+                      id="confirm"
+                      type={showConfirm ? 'text' : 'password'}
+                      name="confirm"
+                      placeholder="Repeat your password"
+                      value={form.confirm}
+                      onChange={handleChange}
+                      required
+                      autoComplete="new-password"
+                      className={`${inputBase} pr-12 ${!passwordsMatch ? 'border-red-400 ring-4 ring-red-100' : ''}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirm(v => !v)}
+                      aria-label={showConfirm ? 'Hide password' : 'Show password'}
+                      className="absolute right-4 bg-transparent border-none p-0 cursor-pointer text-slate-400 flex items-center transition-colors hover:text-slate-900"
+                    >
+                      {showConfirm ? <EyeOffIcon /> : <EyeIcon />}
+                    </button>
+                  </div>
+                  {!passwordsMatch && (
+                    <span className="text-xs text-red-500">Passwords do not match</span>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={!passwordsMatch || loading}
+                  className="flex items-center justify-center gap-2 h-12 bg-slate-900 text-white border-none rounded-xl text-sm font-semibold cursor-pointer w-full mt-1 shadow-lg shadow-slate-900/20 hover:bg-slate-800 hover:-translate-y-0.5 active:translate-y-0 disabled:bg-slate-300 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:translate-y-0 transition-all duration-200"
+                >
+                  {loading ? (
+                    <>
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Creating account...
+                    </>
+                  ) : 'Create account'}
+                </button>
+              </form>
+
+              <div className="flex items-center gap-3 text-slate-300 text-xs tracking-wide mt-6 mb-4">
+                <div className="flex-1 h-px bg-slate-200" />
+                <span>or</span>
+                <div className="flex-1 h-px bg-slate-200" />
               </div>
 
               <button
-                type="submit"
-                disabled={!passwordsMatch || loading}
-                className="flex items-center justify-center gap-2 h-12 bg-slate-900 text-white border-none rounded-xl text-sm font-semibold cursor-pointer w-full mt-1 shadow-lg shadow-slate-900/20 hover:bg-slate-800 hover:-translate-y-0.5 active:translate-y-0 disabled:bg-slate-300 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:translate-y-0 transition-all duration-200"
+                type="button"
+                className="flex items-center justify-center gap-3 h-12 border border-slate-200 rounded-xl bg-white text-sm font-semibold text-slate-700 cursor-pointer w-full hover:border-slate-400 hover:bg-slate-50 transition-all duration-200"
               >
-                {loading ? (
-                  <>
-                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                    Creating account...
-                  </>
-                ) : 'Create account'}
+                <GoogleIcon />
+                Sign up with Google
               </button>
-            </form>
 
-            <div className="flex items-center gap-3 text-slate-300 text-xs tracking-wide mt-6 mb-4">
-              <div className="flex-1 h-px bg-slate-200" />
-              <span>or</span>
-              <div className="flex-1 h-px bg-slate-200" />
+              <p className="text-center text-sm text-slate-500 mt-5">
+                Already have an account?{' '}
+                <Link
+                  to="/login"
+                  className="text-slate-900 font-semibold no-underline border-b border-b-slate-900 pb-[0.5px] transition-colors hover:text-[#FF5533] hover:border-b-[#FF5533]"
+                >
+                  Sign in
+                </Link>
+              </p>
             </div>
-
-            <button
-              type="button"
-              className="flex items-center justify-center gap-3 h-12 border border-slate-200 rounded-xl bg-white text-sm font-semibold text-slate-700 cursor-pointer w-full hover:border-slate-400 hover:bg-slate-50 transition-all duration-200"
-            >
-              <GoogleIcon />
-              Sign up with Google
-            </button>
-
-            <p className="text-center text-sm text-slate-500 mt-5">
-              Already have an account?{' '}
-              <Link
-                to="/login"
-                className="text-slate-900 font-semibold no-underline border-b border-b-slate-900 pb-[0.5px] transition-colors hover:text-[#FF5533] hover:border-b-[#FF5533]"
-              >
-                Sign in
-              </Link>
-            </p>
-          </div>
+          )}
         </div>
       </div>
     </div>

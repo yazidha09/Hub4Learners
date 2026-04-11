@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
+import Markdown from 'react-markdown'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import DashboardLayout, { type NavItem } from '../components/DashboardLayout'
-import { getMyUpgradeRequest, submitUpgradeRequest, type UpgradeRequestOut } from '../api/upgrade'
 import {
   listPublishedCourses, getEnrolledCourses, enrollInCourse, unenrollFromCourse,
   type CourseOut,
@@ -10,6 +10,8 @@ import {
 import { listCategories, type CategoryOut } from '../api/category'
 import { sendChatRequest, getMyChatRequests, type ChatRequestOut } from '../api/chat'
 import ChatRoom from '../components/ChatRoom'
+import { listUniversities, type UniversityOut } from '../api/org'
+import { updateProfile } from '../api/auth'
 
 /* ── Icons ── */
 const HomeIcon = () => (
@@ -25,12 +27,6 @@ const BookIcon = () => (
 const ChartIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" />
-  </svg>
-)
-const UpgradeIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="17 11 12 6 7 11" /><line x1="12" y1="6" x2="12" y2="18" />
-    <circle cx="12" cy="12" r="10" />
   </svg>
 )
 const GraduationCapIcon = () => (
@@ -50,10 +46,7 @@ const BASE_NAV: NavItem[] = [
   { id: 'my-courses', label: 'My Courses', icon: <GraduationCapIcon /> },
   { id: 'chat', label: 'Chat Requests', icon: <ChatIcon /> },
   { id: 'grades', label: 'Grades', icon: <ChartIcon /> },
-  { id: 'upgrade', label: 'Become Professor', icon: <UpgradeIcon /> },
 ]
-
-const HIDE_UPGRADE_KEY = 'h4l_hide_upgrade'
 
 /* ── Mock data ── */
 const COURSES = [
@@ -74,6 +67,85 @@ function getGreeting() {
   if (h < 12) return 'Good morning'
   if (h < 18) return 'Good afternoon'
   return 'Good evening'
+}
+
+/* ── University self-assignment card ── */
+function UniversityCard({ token }: { token: string }) {
+  const { user, refreshUser } = useAuth()
+  const [unis, setUnis] = useState<UniversityOut[]>([])
+  const [editing, setEditing] = useState(false)
+  const [selected, setSelected] = useState(user?.university_id ?? '')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    listUniversities(token).then(setUnis).catch(() => {})
+  }, [token])
+
+  const handleSave = async () => {
+    setSaving(true); setErr('')
+    try {
+      await updateProfile(token, { university_id: selected || '' })
+      refreshUser()
+      setEditing(false)
+    } catch (e: any) { setErr(e.message) }
+    finally { setSaving(false) }
+  }
+
+  if (!editing && user?.university_name) {
+    return (
+      <div className="bg-white border border-[#E5E7EB] rounded-xl px-5 py-4 shadow-sm flex items-center justify-between">
+        <div>
+          <p className="text-[0.65rem] font-bold tracking-[0.12em] uppercase text-[#94A3B8] mb-0.5">My University</p>
+          <p className="text-[0.88rem] font-semibold text-[#0C0C0F]">{user.university_name}</p>
+          {user.region_name && <p className="text-xs text-[#94A3B8]">{user.region_name}</p>}
+        </div>
+        <button
+          onClick={() => { setSelected(user.university_id ?? ''); setEditing(true) }}
+          className="text-xs font-semibold text-[#94A3B8] hover:text-[#0C0C0F] transition-colors cursor-pointer bg-transparent border-none px-2 py-1"
+        >
+          Change
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-white border border-[#E5E7EB] rounded-xl px-5 py-4 shadow-sm">
+      <p className="text-[0.65rem] font-bold tracking-[0.12em] uppercase text-[#94A3B8] mb-1">My University</p>
+      {!user?.university_name && (
+        <p className="text-xs text-[#94A3B8] mb-3">Assign yourself to a university to get tailored recommendations and announcements.</p>
+      )}
+      <div className="flex gap-2">
+        <select
+          value={selected}
+          onChange={e => setSelected(e.target.value)}
+          className="flex-1 h-10 px-3 border border-[#E5E7EB] rounded-lg text-[0.87rem] bg-white outline-none focus:border-[#0C0C0F] focus:shadow-[0_0_0_3px_rgba(12,12,15,0.07)] transition-all"
+        >
+          <option value="">Not assigned</option>
+          {unis.map(u => (
+            <option key={u.id} value={u.id}>{u.name}{u.region_name ? ` · ${u.region_name}` : ''}</option>
+          ))}
+        </select>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="h-10 px-4 rounded-lg bg-[#0C0C0F] text-white text-[0.84rem] font-semibold cursor-pointer hover:bg-[#1E1E23] disabled:bg-[#D1D5DB] border-none transition-colors"
+        >
+          {saving ? '...' : 'Save'}
+        </button>
+        {editing && (
+          <button
+            onClick={() => setEditing(false)}
+            className="h-10 px-3 rounded-lg text-[0.84rem] font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 border-none cursor-pointer transition-colors"
+          >
+            Cancel
+          </button>
+        )}
+      </div>
+      {err && <p className="text-xs text-red-500 mt-2">{err}</p>}
+    </div>
+  )
 }
 
 function FileUploadField({
@@ -223,6 +295,7 @@ function BrowseCoursesSection({ token }: { token: string }) {
   const [err, setErr] = useState('')
   const [selected, setSelected] = useState<CourseOut | null>(null)
   const [search, setSearch] = useState('')
+  const [expandedMaterial, setExpandedMaterial] = useState<string | null>(null)
 
   useEffect(() => {
     listCategories().then(setCategories).catch(() => {})
@@ -367,27 +440,47 @@ function BrowseCoursesSection({ token }: { token: string }) {
                 {section.materials.length > 0 && (
                   <div className="divide-y divide-slate-50">
                     {section.materials.map(m => (
-                      <div key={m.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50/50 transition-colors duration-200">
-                        <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-lg">{typeIcon[m.type] ?? '📁'}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium text-slate-900 truncate">{m.title}</div>
-                          <div className="text-xs text-slate-400 uppercase tracking-wider">{m.type}</div>
+                      <div key={m.id}>
+                        <div className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50/50 transition-colors duration-200">
+                          <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-lg">{typeIcon[m.type] ?? '📁'}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-slate-900 truncate">{m.title}</div>
+                            <div className="text-xs text-slate-400 uppercase tracking-wider">{m.type}</div>
+                          </div>
+                          {isEnrolled ? (
+                            m.type === 'pdf' && m.content_text ? (
+                              <button
+                                onClick={() => setExpandedMaterial(expandedMaterial === m.id ? null : m.id)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors duration-200 border-none cursor-pointer">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                                </svg>
+                                {expandedMaterial === m.id ? 'Close' : 'Read'}
+                              </button>
+                            ) : (
+                              <a href={`http://localhost:8000/uploads/${m.file_url}`} target="_blank" rel="noreferrer"
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors duration-200 no-underline">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                </svg>
+                                Open
+                              </a>
+                            )
+                          ) : (
+                            <span className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 bg-slate-50 rounded-lg">
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                              </svg>
+                              Enroll to access
+                            </span>
+                          )}
                         </div>
-                        {isEnrolled ? (
-                          <a href={`http://localhost:8000/uploads/${m.file_url}`} target="_blank" rel="noreferrer"
-                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors duration-200 no-underline">
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                            </svg>
-                            Open
-                          </a>
-                        ) : (
-                          <span className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 bg-slate-50 rounded-lg">
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-                            </svg>
-                            Enroll to access
-                          </span>
+                        {expandedMaterial === m.id && m.content_text && (
+                          <div className="px-6 py-5 bg-slate-50 border-t border-slate-100">
+                            <div className="prose-sm max-w-none text-slate-700 leading-relaxed [&>h1]:text-xl [&>h1]:font-bold [&>h1]:mb-3 [&>h1]:text-slate-900 [&>h2]:text-lg [&>h2]:font-semibold [&>h2]:mb-2 [&>h2]:text-slate-800 [&>h3]:text-base [&>h3]:font-semibold [&>h3]:mb-1.5 [&>h3]:text-slate-800 [&>p]:mb-3 [&>p]:text-[0.875rem] [&>ul]:list-disc [&>ul]:pl-5 [&>ul]:mb-3 [&>ol]:list-decimal [&>ol]:pl-5 [&>ol]:mb-3 [&>li]:mb-1 [&>li]:text-[0.875rem] [&>pre]:bg-slate-900 [&>pre]:text-slate-100 [&>pre]:rounded-lg [&>pre]:p-4 [&>pre]:mb-3 [&>pre]:overflow-x-auto [&>code]:bg-slate-200 [&>code]:px-1 [&>code]:rounded [&>code]:text-[0.8rem] [&>blockquote]:border-l-4 [&>blockquote]:border-slate-300 [&>blockquote]:pl-4 [&>blockquote]:italic [&>blockquote]:text-slate-600">
+                              <Markdown>{m.content_text}</Markdown>
+                            </div>
+                          </div>
                         )}
                       </div>
                     ))}
@@ -434,7 +527,7 @@ function BrowseCoursesSection({ token }: { token: string }) {
                   ? 'bg-slate-900 text-white border-slate-900'
                   : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
               }`}
-            >{cat.icon} {cat.name}</button>
+            >{cat.name}</button>
           ))}
         </div>
       )}
@@ -549,6 +642,7 @@ function MyCoursesSection({ token }: { token: string }) {
   const [confirmUnenroll, setConfirmUnenroll] = useState<string | null>(null)
   const [unenrolling, setUnenrolling] = useState(false)
   const [unenrollErr, setUnenrollErr] = useState('')
+  const [expandedMaterial, setExpandedMaterial] = useState<string | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -665,19 +759,39 @@ function MyCoursesSection({ token }: { token: string }) {
                 {section.materials.length > 0 && (
                   <div className="divide-y divide-slate-50">
                     {section.materials.map(m => (
-                      <div key={m.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50/50 transition-colors duration-200">
-                        <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-lg">{typeIcon[m.type] ?? '📁'}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium text-slate-900 truncate">{m.title}</div>
-                          <div className="text-xs text-slate-400 uppercase tracking-wider">{m.type}</div>
+                      <div key={m.id}>
+                        <div className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50/50 transition-colors duration-200">
+                          <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-lg">{typeIcon[m.type] ?? '📁'}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-slate-900 truncate">{m.title}</div>
+                            <div className="text-xs text-slate-400 uppercase tracking-wider">{m.type}</div>
+                          </div>
+                          {m.type === 'pdf' && m.content_text ? (
+                            <button
+                              onClick={() => setExpandedMaterial(expandedMaterial === m.id ? null : m.id)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors duration-200 border-none cursor-pointer">
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                              </svg>
+                              {expandedMaterial === m.id ? 'Close' : 'Read'}
+                            </button>
+                          ) : (
+                            <a href={`http://localhost:8000/uploads/${m.file_url}`} target="_blank" rel="noreferrer"
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors duration-200 no-underline">
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                              </svg>
+                              Open
+                            </a>
+                          )}
                         </div>
-                        <a href={`http://localhost:8000/uploads/${m.file_url}`} target="_blank" rel="noreferrer"
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors duration-200 no-underline">
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                          </svg>
-                          Open
-                        </a>
+                        {expandedMaterial === m.id && m.content_text && (
+                          <div className="px-6 py-5 bg-slate-50 border-t border-slate-100">
+                            <div className="prose-sm max-w-none text-slate-700 leading-relaxed [&>h1]:text-xl [&>h1]:font-bold [&>h1]:mb-3 [&>h1]:text-slate-900 [&>h2]:text-lg [&>h2]:font-semibold [&>h2]:mb-2 [&>h2]:text-slate-800 [&>h3]:text-base [&>h3]:font-semibold [&>h3]:mb-1.5 [&>h3]:text-slate-800 [&>p]:mb-3 [&>p]:text-[0.875rem] [&>ul]:list-disc [&>ul]:pl-5 [&>ul]:mb-3 [&>ol]:list-decimal [&>ol]:pl-5 [&>ol]:mb-3 [&>li]:mb-1 [&>li]:text-[0.875rem] [&>pre]:bg-slate-900 [&>pre]:text-slate-100 [&>pre]:rounded-lg [&>pre]:p-4 [&>pre]:mb-3 [&>pre]:overflow-x-auto [&>code]:bg-slate-200 [&>code]:px-1 [&>code]:rounded [&>code]:text-[0.8rem] [&>blockquote]:border-l-4 [&>blockquote]:border-slate-300 [&>blockquote]:pl-4 [&>blockquote]:italic [&>blockquote]:text-slate-600">
+                              <Markdown>{m.content_text}</Markdown>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -895,253 +1009,20 @@ function ChatRequestsSection({ token, currentUserId }: { token: string; currentU
   )
 }
 
-function UpgradeSection({ token }: { token: string }) {
-  const [upgradeReq, setUpgradeReq] = useState<UpgradeRequestOut | null | undefined>(undefined)
-  const [cin, setCin] = useState<File | null>(null)
-  const [diploma, setDiploma] = useState<File | null>(null)
-  const [message, setMessage] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    getMyUpgradeRequest(token).then(setUpgradeReq).catch(() => setUpgradeReq(null))
-  }, [token])
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!cin) return
-    setError('')
-    setSubmitting(true)
-    try {
-      const fd = new FormData()
-      fd.append('cin', cin)
-      if (diploma) fd.append('diploma', diploma)
-      if (message.trim()) fd.append('message', message.trim())
-      const result = await submitUpgradeRequest(token, fd)
-      setUpgradeReq(result)
-    } catch (err: any) {
-      setError(err.message || 'Submission failed')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  if (upgradeReq === undefined) {
-    return (
-      <div className="max-w-[560px] animate-fadeIn">
-        <div className="h-40 rounded-2xl skeleton" />
-      </div>
-    )
-  }
-
-  /* ── Pending ── */
-  if (upgradeReq?.status === 'pending') {
-    return (
-      <div className="max-w-[560px] animate-fadeIn">
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.06)] overflow-hidden">
-          <div className="p-6">
-            <div className="flex items-start gap-4 mb-4">
-              <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
-                <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="inline-flex items-center gap-2 px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-semibold">
-                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                    Under review
-                  </span>
-                </div>
-                <h3 className="text-lg font-bold text-slate-900 mb-2">Your request is being reviewed</h3>
-                <p className="text-sm text-slate-500 leading-relaxed">
-                  An admin will review your documents and get back to you. You'll see the result here once a decision is made.
-                </p>
-              </div>
-            </div>
-          </div>
-          <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
-            <span className="text-xs text-slate-400 flex items-center gap-1.5">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-              </svg>
-              Submitted {new Date(upgradeReq.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-            </span>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  /* ── Rejected ── */
-  const showForm = !upgradeReq || upgradeReq.status === 'rejected'
-
-  return (
-    <div className="max-w-[560px] animate-fadeIn">
-      {upgradeReq?.status === 'rejected' && (
-        <div className="flex items-start gap-4 p-5 bg-red-50 border border-red-200 rounded-2xl mb-6">
-          <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
-            <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-            </svg>
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-red-700 mb-1">Previous request was rejected</p>
-            {upgradeReq.reviewer_notes && (
-              <p className="text-sm text-red-600 mb-2">"{upgradeReq.reviewer_notes}"</p>
-            )}
-            <p className="text-xs text-red-500">You can submit a new request below.</p>
-          </div>
-        </div>
-      )}
-
-      {showForm && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.06)] overflow-hidden">
-          {/* Header */}
-          <div className="p-6 border-b border-slate-100">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#FF5533] to-[#e5482b] flex items-center justify-center shadow-lg shadow-orange-500/20">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5" />
-                </svg>
-              </div>
-              <div>
-                <h2 className="text-xl font-bold text-slate-900 tracking-tight">Become a Professor</h2>
-                <p className="text-sm text-slate-500">Share your knowledge with students worldwide</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="p-6 space-y-5">
-            <p className="text-sm text-slate-600 leading-relaxed">
-              Upload your identity document and optionally your diploma. An admin will review your request within 24-48 hours.
-            </p>
-
-            {error && (
-              <div className="flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600">
-                <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-                </svg>
-                {error}
-              </div>
-            )}
-
-            <FileUploadField
-              label="CIN Card"
-              required
-              accept=".jpg,.jpeg,.png,.pdf"
-              file={cin}
-              onChange={setCin}
-            />
-
-            <FileUploadField
-              label="Diploma / Certificate (optional)"
-              accept=".jpg,.jpeg,.png,.pdf"
-              file={diploma}
-              onChange={setDiploma}
-            />
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">
-                Message (optional)
-              </label>
-              <textarea
-                value={message}
-                onChange={e => setMessage(e.target.value)}
-                placeholder="Any additional information for the admin…"
-                rows={3}
-                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 resize-none outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100 transition-all duration-200"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={!cin || submitting}
-              className="w-full flex items-center justify-center gap-2 h-12 bg-gradient-to-r from-[#FF5533] to-[#e5482b] text-white rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200 shadow-lg shadow-orange-500/25 hover:shadow-orange-500/40 hover:-translate-y-0.5 disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none disabled:cursor-not-allowed disabled:hover:translate-y-0"
-            >
-              {submitting ? (
-                <>
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  Submitting...
-                </>
-              ) : (
-                <>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-                  </svg>
-                  Submit request
-                </>
-              )}
-            </button>
-          </form>
-        </div>
-      )}
-    </div>
-  )
-}
 
 export default function StudentDashboard() {
   const { user, token } = useAuth()
   const [nav, setNav] = useState('home')
-  const [hideUpgrade, setHideUpgrade] = useState(() => localStorage.getItem(HIDE_UPGRADE_KEY) === 'true')
   const firstName = user?.full_name?.split(' ')[0] || ''
-
-  const toggleHideUpgrade = () => {
-    const next = !hideUpgrade
-    setHideUpgrade(next)
-    if (next) {
-      localStorage.setItem(HIDE_UPGRADE_KEY, 'true')
-      if (nav === 'upgrade') setNav('home')
-    } else {
-      localStorage.removeItem(HIDE_UPGRADE_KEY)
-    }
-  }
-
-  const NAV = hideUpgrade ? BASE_NAV.filter(n => n.id !== 'upgrade') : BASE_NAV
-
-  const upgradeToggle = (
-    <div className="flex items-center justify-between">
-      <div>
-        <div className="text-[0.82rem] font-medium text-[#0C0C0F]">Show "Become Professor"</div>
-        <div className="text-[0.7rem] text-[#94A3B8]">Toggle the upgrade option in your sidebar</div>
-      </div>
-      <button
-        onClick={toggleHideUpgrade}
-        className={`relative w-10 h-[22px] rounded-full border-none cursor-pointer transition-colors duration-200 ${
-          hideUpgrade ? 'bg-[#D1D5DB]' : 'bg-[#0C0C0F]'
-        }`}
-      >
-        <span
-          className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${
-            hideUpgrade ? 'left-[3px]' : 'left-[21px]'
-          }`}
-        />
-      </button>
-    </div>
-  )
 
   const resumeCourse = COURSES.reduce(
     (best, c) => (c.progress > 0 && c.progress < 100 && c.progress > (best?.progress ?? 0) ? c : best),
     null as (typeof COURSES)[0] | null,
   )
 
-  if (nav === 'upgrade') {
-    return (
-      <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Student" settingsExtra={upgradeToggle}>
-        <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
-          <UpgradeSection token={token!} />
-        </div>
-      </DashboardLayout>
-    )
-  }
-
   if (nav === 'courses') {
     return (
-      <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Student" settingsExtra={upgradeToggle}>
+      <DashboardLayout navItems={BASE_NAV} activeNav={nav} onNavChange={setNav} roleLabel="Student">
         <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
           <BrowseCoursesSection token={token!} />
         </div>
@@ -1151,7 +1032,7 @@ export default function StudentDashboard() {
 
   if (nav === 'my-courses') {
     return (
-      <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Student" settingsExtra={upgradeToggle}>
+      <DashboardLayout navItems={BASE_NAV} activeNav={nav} onNavChange={setNav} roleLabel="Student">
         <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
           <MyCoursesSection token={token!} />
         </div>
@@ -1161,7 +1042,7 @@ export default function StudentDashboard() {
 
   if (nav === 'chat') {
     return (
-      <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Student" settingsExtra={upgradeToggle}>
+      <DashboardLayout navItems={BASE_NAV} activeNav={nav} onNavChange={setNav} roleLabel="Student">
         <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
           <ChatRequestsSection token={token!} currentUserId={user!.id} />
         </div>
@@ -1171,10 +1052,10 @@ export default function StudentDashboard() {
 
   if (nav !== 'home') {
     return (
-      <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Student" settingsExtra={upgradeToggle}>
+      <DashboardLayout navItems={BASE_NAV} activeNav={nav} onNavChange={setNav} roleLabel="Student">
         <div className="flex-1 flex items-center justify-center min-h-[60vh]">
           <div className="text-center">
-            <h2 className="text-[1.1rem] font-bold text-[#0C0C0F]">{NAV.find(n => n.id === nav)?.label}</h2>
+            <h2 className="text-[1.1rem] font-bold text-[#0C0C0F]">{BASE_NAV.find(n => n.id === nav)?.label}</h2>
             <p className="text-[0.82rem] text-[#94A3B8] mt-1">Coming soon</p>
           </div>
         </div>
@@ -1183,7 +1064,7 @@ export default function StudentDashboard() {
   }
 
   return (
-    <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Student">
+    <DashboardLayout navItems={BASE_NAV} activeNav={nav} onNavChange={setNav} roleLabel="Student">
       <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
 
         {/* Hero */}
@@ -1233,6 +1114,11 @@ export default function StudentDashboard() {
               ))}
             </div>
           </div>
+        </div>
+
+        {/* University affiliation */}
+        <div className="mb-8">
+          <UniversityCard token={token!} />
         </div>
 
         {/* Continue learning */}

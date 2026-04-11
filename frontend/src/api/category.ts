@@ -31,7 +31,7 @@ export function listCategories(): Promise<CategoryOut[]> {
 
 export function createCategory(
   token: string,
-  data: { name: string; description?: string; icon: string },
+  data: { name: string; description?: string },
 ): Promise<CategoryOut> {
   return req<CategoryOut>('/categories', token, {
     method: 'POST',

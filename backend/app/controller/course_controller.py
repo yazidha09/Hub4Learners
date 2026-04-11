@@ -228,6 +228,16 @@ def toggle_publish(professor_id: str, course_id: str, db: Session) -> CourseOut:
         raise HTTPException(status_code=404, detail="Course not found")
     if str(course.professor_id) != professor_id:
         raise HTTPException(status_code=403, detail="Not your course")
+
+    # Block publishing for unverified professors
+    if not course.is_published:
+        prof = db.query(User).filter(User.id == UUID(professor_id)).first()
+        if prof and not prof.is_verified:
+            raise HTTPException(
+                status_code=403,
+                detail="Your account must be verified before you can publish courses. Submit a verification request to your region admin.",
+            )
+
     course.is_published = not course.is_published
     db.commit()
     db.refresh(course)

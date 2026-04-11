@@ -15,6 +15,6 @@ export default function DashboardPage() {
   }
 
   if (user.role === 'professor') return <ProfessorDashboard />
-  if (user.role === 'admin') return <AdminDashboard />
+  if (['super_admin', 'regional_admin', 'university_admin'].includes(user.role)) return <AdminDashboard />
   return <StudentDashboard />
 }

@@ -8,6 +8,8 @@ export interface AdminUser {
   email: string
   role: string
   is_active: boolean
+  university_id: string | null
+  region_id: string | null
   created_at: string
 }
 
@@ -15,11 +17,25 @@ export interface PlatformStats {
   total_users: number
   total_students: number
   total_professors: number
+  total_university_admins: number
+  total_regional_admins: number
+  total_super_admins: number
   total_admins: number
   total_courses: number
   published_courses: number
   total_enrollments: number
 }
+
+// Role display helpers
+export const ROLE_LABELS: Record<string, string> = {
+  student:          'Student',
+  professor:        'Professor',
+  university_admin: 'Univ. Admin',
+  regional_admin:   'Regional Admin',
+  super_admin:      'Super Admin',
+}
+
+export const ALL_ROLES = ['student', 'professor', 'university_admin', 'regional_admin', 'super_admin'] as const
 
 async function request<T>(path: string, token: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {

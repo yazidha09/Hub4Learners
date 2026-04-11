@@ -10,8 +10,13 @@ export interface UserOut {
   full_name: string;
   email: string;
   role: string;
+  is_verified: boolean;
   bio: string | null;
   profile_image: string | null;
+  university_id: string | null;
+  region_id: string | null;
+  university_name: string | null;
+  region_name: string | null;
 }
 
 export interface UpdateProfileData {
@@ -20,6 +25,7 @@ export interface UpdateProfileData {
   bio?: string;
   current_password?: string;
   new_password?: string;
+  university_id?: string | null;  // "" or null to unlink
 }
 
 async function request<T>(
@@ -27,8 +33,8 @@ async function request<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${url}`, {
-    headers: { "Content-Type": "application/json", ...options.headers },
     ...options,
+    headers: { "Content-Type": "application/json", ...options.headers },
   });
 
   if (!res.ok) {
@@ -44,6 +50,7 @@ export function registerUser(data: {
   last_name: string;
   email: string;
   password: string;
+  role?: string;
 }) {
   return request<TokenResponse>("/auth/register", {
     method: "POST",

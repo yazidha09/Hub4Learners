@@ -351,6 +351,7 @@ export default function CourseLearningPage() {
                     </video>
                   </div>
                 ) : activeMaterial.type === 'pdf' ? (
+                  /* ── native PDF viewer ── */
                   <iframe
                     key={activeMaterial.id}
                     src={materialUrl}
@@ -358,7 +359,7 @@ export default function CourseLearningPage() {
                     title={activeMaterial.title}
                   />
                 ) : (
-                  /* audio or exercise fallback */
+                  /* audio, exercise, link fallback */
                   <div className="h-full flex flex-col items-center justify-center gap-4">
                     <div className="w-20 h-20 rounded-2xl bg-[#1A1D25] flex items-center justify-center text-[#FF5533]">
                       {Icons.pdf}

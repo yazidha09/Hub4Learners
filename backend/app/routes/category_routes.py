@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.controller import category_controller
 from app.database import get_db
 from app.schemas.category import CategoryOut
-from app.utils.security import require_role
+from app.utils.security import require_min_rank
 
 router = APIRouter(prefix="/categories", tags=["categories"])
 
@@ -42,7 +42,7 @@ def get_category(category_id: str, db: Session = Depends(get_db)):
 def create_category(
     body: CategoryCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_role("admin")),
+    current_user: dict = Depends(require_min_rank("super_admin")),
 ):
     return category_controller.create_category(body.name, body.description, body.icon, db)
 
@@ -52,7 +52,7 @@ def update_category(
     category_id: str,
     body: CategoryUpdate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_role("admin")),
+    current_user: dict = Depends(require_min_rank("super_admin")),
 ):
     return category_controller.update_category(category_id, body.name, body.description, body.icon, db)
 
@@ -61,6 +61,6 @@ def update_category(
 def delete_category(
     category_id: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_role("admin")),
+    current_user: dict = Depends(require_min_rank("super_admin")),
 ):
     return category_controller.delete_category(category_id, db)

@@ -7,6 +7,22 @@ import {
 } from "react";
 import { getMe, type UserOut } from "../api/auth";
 
+export type UserRole = 'student' | 'professor' | 'university_admin' | 'regional_admin' | 'super_admin'
+
+export const ROLE_RANK: Record<UserRole, number> = {
+  student:          0,
+  professor:        1,
+  university_admin: 2,
+  regional_admin:   3,
+  super_admin:      4,
+}
+
+/** Returns true if the user's role rank is >= the minimum required role rank. */
+export function hasMinRank(userRole: string | undefined, minRole: UserRole): boolean {
+  const rank = ROLE_RANK[userRole as UserRole] ?? -1
+  return rank >= ROLE_RANK[minRole]
+}
+
 interface AuthContextValue {
   token: string | null;
   user: UserOut | null;

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import Markdown from 'react-markdown'
 import { useAuth } from '../context/AuthContext'
 import DashboardLayout, { type NavItem } from '../components/DashboardLayout'
 import {
@@ -9,6 +10,14 @@ import {
 import { listCategories, type CategoryOut } from '../api/category'
 import { getIncomingChatRequests, reviewChatRequest, getAutoRefuse, setAutoRefuse, type ChatRequestOut } from '../api/chat'
 import ChatRoom from '../components/ChatRoom'
+import {
+  listUniversities, listRegions, submitJoinRequest, listJoinRequests, cancelJoinRequest,
+  type UniversityOut, type JoinRequestOut, type RegionOut,
+} from '../api/org'
+import {
+  submitVerification, listVerifications, cancelVerification,
+  type ProfVerificationOut,
+} from '../api/prof_verification'
 
 /* ── Icons ── */
 const HomeIcon = () => (
@@ -67,6 +76,324 @@ const MATERIAL_TYPES = [
 
 /* ── Shared input style ── */
 const inputCls = 'h-10 px-3 border border-[#E5E7EB] rounded-lg text-[0.87rem] text-[#0C0C0F] bg-white outline-none placeholder:text-[#C4C9D4] focus:border-[#0C0C0F] focus:shadow-[0_0_0_3px_rgba(12,12,15,0.07)] transition-[border-color,box-shadow] w-full'
+
+/* ── Professor Verification Banner ── */
+function VerificationBanner({ token }: { token: string }) {
+  const { refreshUser } = useAuth()
+  const [regions, setRegions] = useState<RegionOut[]>([])
+  const [requests, setRequests] = useState<ProfVerificationOut[]>([])
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({
+    region_id: '',
+    birth_date: '',
+    first_name: '',
+    father_name: '',
+    grandfather_name: '',
+  })
+  const [saving, setSaving] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [err, setErr] = useState('')
+
+  const pending = requests.find(r => r.status === 'pending')
+  const rejected = requests.find(r => r.status === 'rejected')
+
+  useEffect(() => {
+    listRegions(token).then(setRegions).catch(() => {})
+    listVerifications(token).then(setRequests).catch(() => {})
+  }, [token])
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!form.region_id || !form.birth_date || !form.first_name || !form.father_name || !form.grandfather_name) return
+    setSaving(true); setErr('')
+    try {
+      const req = await submitVerification(token, {
+        region_id: form.region_id,
+        birth_date: form.birth_date,
+        first_name: form.first_name.trim(),
+        father_name: form.father_name.trim(),
+        grandfather_name: form.grandfather_name.trim(),
+      })
+      setRequests(prev => [req, ...prev])
+      setShowForm(false)
+    } catch (e: any) { setErr(e.message) }
+    finally { setSaving(false) }
+  }
+
+  const handleCancel = async (id: string) => {
+    setCancelling(true)
+    try {
+      await cancelVerification(token, id)
+      setRequests(prev => prev.filter(r => r.id !== id))
+    } catch (e: any) { setErr(e.message) }
+    finally { setCancelling(false) }
+  }
+
+  const inputCls = 'h-10 px-3 border border-amber-200 rounded-lg text-[0.87rem] text-[#0C0C0F] bg-white outline-none placeholder:text-[#C4C9D4] focus:border-amber-500 focus:shadow-[0_0_0_3px_rgba(217,119,6,0.1)] transition-[border-color,box-shadow] w-full'
+
+  return (
+    <div className="mb-8 rounded-2xl border-2 border-amber-300 bg-amber-50 p-5 shadow-[0_8px_24px_rgba(217,119,6,0.1)]">
+      <div className="flex items-start gap-4">
+        <div className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-200 flex items-center justify-center shrink-0 text-amber-600">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          </svg>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <p className="text-[0.92rem] font-bold text-amber-900">Account not verified</p>
+            <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-800 text-[0.7rem] font-bold uppercase tracking-wide">Draft only</span>
+          </div>
+          <p className="text-[0.84rem] text-amber-700 leading-relaxed">
+            You can create and edit courses, but publishing requires verification by a region admin.
+            Submit your civil identity details below to request verification.
+          </p>
+
+          {/* Pending request state */}
+          {pending && !showForm && (
+            <div className="mt-3 flex items-center justify-between bg-white border border-amber-200 rounded-xl px-4 py-3">
+              <div>
+                <p className="text-[0.8rem] font-semibold text-amber-800">Verification request pending</p>
+                <p className="text-[0.76rem] text-amber-600 mt-0.5">
+                  Region: {pending.region_name} · Submitted {new Date(pending.created_at).toLocaleDateString()}
+                </p>
+              </div>
+              <button
+                onClick={() => handleCancel(pending.id)}
+                disabled={cancelling}
+                className="text-xs font-semibold text-amber-600 hover:text-red-600 bg-transparent border-none cursor-pointer disabled:opacity-50 transition-colors"
+              >
+                {cancelling ? '...' : 'Cancel'}
+              </button>
+            </div>
+          )}
+
+          {/* Rejected state */}
+          {rejected && !pending && !showForm && (
+            <div className="mt-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+              <p className="text-[0.8rem] font-semibold text-red-700">Previous request rejected</p>
+              <p className="text-[0.76rem] text-red-500 mt-0.5">You can submit a new request.</p>
+            </div>
+          )}
+
+          {/* Submit form */}
+          {showForm ? (
+            <form onSubmit={handleSubmit} className="mt-4 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-[0.7rem] font-bold uppercase tracking-wide text-amber-700 mb-1">Region *</label>
+                  <select
+                    value={form.region_id}
+                    onChange={e => setForm(f => ({ ...f, region_id: e.target.value }))}
+                    className="h-10 px-3 border border-amber-200 rounded-lg text-[0.87rem] bg-white outline-none focus:border-amber-500 focus:shadow-[0_0_0_3px_rgba(217,119,6,0.1)] transition-all w-full"
+                    required
+                  >
+                    <option value="">Select your region</option>
+                    {regions.map(r => (
+                      <option key={r.id} value={r.id}>{r.name}{r.code ? ` (${r.code})` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-[0.7rem] font-bold uppercase tracking-wide text-amber-700 mb-1">Date of birth *</label>
+                  <input
+                    type="date"
+                    value={form.birth_date}
+                    onChange={e => setForm(f => ({ ...f, birth_date: e.target.value }))}
+                    className={inputCls}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[0.7rem] font-bold uppercase tracking-wide text-amber-700 mb-1">Your first name *</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Ahmed"
+                    value={form.first_name}
+                    onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))}
+                    className={inputCls}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[0.7rem] font-bold uppercase tracking-wide text-amber-700 mb-1">Father's name *</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Mohamed"
+                    value={form.father_name}
+                    onChange={e => setForm(f => ({ ...f, father_name: e.target.value }))}
+                    className={inputCls}
+                    required
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-[0.7rem] font-bold uppercase tracking-wide text-amber-700 mb-1">Grandfather's name *</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Ali"
+                    value={form.grandfather_name}
+                    onChange={e => setForm(f => ({ ...f, grandfather_name: e.target.value }))}
+                    className={inputCls}
+                    required
+                  />
+                </div>
+              </div>
+              {err && <p className="text-xs text-red-600">{err}</p>}
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="h-9 px-5 rounded-lg bg-amber-600 text-white text-[0.84rem] font-semibold cursor-pointer hover:bg-amber-700 disabled:bg-amber-300 border-none transition-colors"
+                >
+                  {saving ? 'Submitting...' : 'Submit for verification'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowForm(false); setErr('') }}
+                  className="h-9 px-4 rounded-lg text-[0.84rem] font-semibold text-amber-700 bg-amber-100 hover:bg-amber-200 border-none cursor-pointer transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : (
+            !pending && (
+              <button
+                onClick={() => setShowForm(true)}
+                className="mt-3 text-[0.82rem] font-semibold text-amber-700 hover:text-amber-900 underline underline-offset-2 bg-transparent border-none cursor-pointer p-0 transition-colors"
+              >
+                + Request verification from region admin
+              </button>
+            )
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ── University affiliation card (request-based) ── */
+function UniversityCard({ token }: { token: string }) {
+  const { user } = useAuth()
+  const [unis, setUnis] = useState<UniversityOut[]>([])
+  const [requests, setRequests] = useState<JoinRequestOut[]>([])
+  const [showForm, setShowForm] = useState(false)
+  const [selectedUni, setSelectedUni] = useState('')
+  const [note, setNote] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [cancelling, setCancelling] = useState<string | null>(null)
+  const [err, setErr] = useState('')
+
+  const pendingReq = requests.find(r => r.status === 'pending')
+
+  useEffect(() => {
+    listUniversities(token).then(setUnis).catch(() => {})
+    listJoinRequests(token).then(setRequests).catch(() => {})
+  }, [token])
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedUni) return
+    setSaving(true); setErr('')
+    try {
+      const req = await submitJoinRequest(token, { university_id: selectedUni, note: note.trim() || undefined })
+      setRequests(prev => [req, ...prev])
+      setShowForm(false); setSelectedUni(''); setNote('')
+    } catch (e: any) { setErr(e.message) }
+    finally { setSaving(false) }
+  }
+
+  const handleCancel = async (id: string) => {
+    setCancelling(id)
+    try {
+      await cancelJoinRequest(token, id)
+      setRequests(prev => prev.filter(r => r.id !== id))
+    } catch (e: any) { setErr(e.message) }
+    finally { setCancelling(null) }
+  }
+
+  return (
+    <div className="bg-white border border-[#E5E7EB] rounded-xl px-5 py-4 shadow-sm space-y-3">
+      <p className="text-[0.65rem] font-bold tracking-[0.12em] uppercase text-[#94A3B8]">My University</p>
+
+      {/* Currently assigned */}
+      {user?.university_name && (
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+          <div>
+            <p className="text-[0.88rem] font-semibold text-[#0C0C0F]">{user.university_name}</p>
+            {user.region_name && <p className="text-xs text-[#94A3B8]">{user.region_name}</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Pending request banner */}
+      {pendingReq && (
+        <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+          <div>
+            <p className="text-xs font-semibold text-amber-700">Pending request</p>
+            <p className="text-[0.8rem] text-amber-600">{pendingReq.university_name}</p>
+          </div>
+          <button
+            onClick={() => handleCancel(pendingReq.id)}
+            disabled={cancelling === pendingReq.id}
+            className="text-xs text-amber-600 hover:text-red-600 font-semibold bg-transparent border-none cursor-pointer disabled:opacity-50"
+          >
+            {cancelling === pendingReq.id ? '...' : 'Cancel'}
+          </button>
+        </div>
+      )}
+
+      {/* Request form */}
+      {showForm ? (
+        <form onSubmit={handleSubmit} className="space-y-2 pt-1">
+          <select
+            value={selectedUni}
+            onChange={e => setSelectedUni(e.target.value)}
+            className="w-full h-10 px-3 border border-[#E5E7EB] rounded-lg text-[0.87rem] bg-white outline-none focus:border-[#0C0C0F] focus:shadow-[0_0_0_3px_rgba(12,12,15,0.07)] transition-all"
+          >
+            <option value="">Select a university *</option>
+            {unis.map(u => (
+              <option key={u.id} value={u.id}>{u.name}{u.region_name ? ` · ${u.region_name}` : ''}</option>
+            ))}
+          </select>
+          <input
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder="Short note for the admin (optional)"
+            className="w-full h-10 px-3 border border-[#E5E7EB] rounded-lg text-[0.87rem] bg-white outline-none focus:border-[#0C0C0F] focus:shadow-[0_0_0_3px_rgba(12,12,15,0.07)] transition-all"
+          />
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={!selectedUni || saving}
+              className="flex-1 h-9 rounded-lg bg-[#0C0C0F] text-white text-[0.84rem] font-semibold cursor-pointer hover:bg-[#1E1E23] disabled:bg-[#D1D5DB] border-none transition-colors"
+            >
+              {saving ? 'Sending...' : 'Send request'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setShowForm(false); setSelectedUni(''); setNote(''); setErr('') }}
+              className="h-9 px-4 rounded-lg text-[0.84rem] font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 border-none cursor-pointer"
+            >
+              Cancel
+            </button>
+          </div>
+          {err && <p className="text-xs text-red-500">{err}</p>}
+        </form>
+      ) : (
+        !pendingReq && (
+          <button
+            onClick={() => setShowForm(true)}
+            className="text-xs font-semibold text-[#FF5533] hover:underline bg-transparent border-none cursor-pointer p-0"
+          >
+            {user?.university_name ? 'Request to change university' : '+ Request to join a university'}
+          </button>
+        )
+      )}
+    </div>
+  )
+}
 
 /* ── File picker ── */
 function FilePicker({ accept, file, onChange, placeholder = 'Click to select file' }: {
@@ -246,10 +573,12 @@ function UploadMaterialForm({ token, courseId, section, onDone }: {
 function CourseManager({ token, course, onBack, onRefresh }: {
   token: string; course: CourseOut; onBack: () => void; onRefresh: (updated: CourseOut) => void
 }) {
+  const { user } = useAuth()
   const [sectionTitle, setSectionTitle] = useState('')
   const [addingSec, setAddingSec] = useState(false)
   const [uploadingFor, setUploadingFor] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
+  const [publishErr, setPublishErr] = useState('')
   const [current, setCurrent] = useState(course)
 
   const refresh = async () => {
@@ -270,12 +599,17 @@ function CourseManager({ token, course, onBack, onRefresh }: {
   }
 
   const handleTogglePublish = async () => {
+    setPublishErr('')
     setPublishing(true)
     try {
       const updated = await togglePublish(token, current.id)
       setCurrent(updated); onRefresh(updated)
+    } catch (e: any) {
+      setPublishErr(e.message || 'Could not toggle publish')
     } finally { setPublishing(false) }
   }
+
+  const canPublish = user?.is_verified !== false || current.is_published
 
   const typeIcons: Record<string, React.ReactNode> = {
     pdf: <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>,
@@ -327,14 +661,20 @@ function CourseManager({ token, course, onBack, onRefresh }: {
               <span className={`w-2 h-2 rounded-full ${current.is_published ? 'bg-emerald-500' : 'bg-slate-400'}`} />
               {current.is_published ? 'Published' : 'Draft'}
             </span>
-            <button 
-              onClick={handleTogglePublish} 
-              disabled={publishing}
+            {publishErr && (
+              <p className="text-xs text-red-500 max-w-[200px] text-right leading-tight">{publishErr}</p>
+            )}
+            <button
+              onClick={handleTogglePublish}
+              disabled={publishing || !canPublish}
+              title={!canPublish ? 'Verify your account to publish courses' : undefined}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-xl border-none cursor-pointer transition-all duration-200 ${
                 current.is_published
                   ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                  : 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 hover:bg-emerald-600 hover:-translate-y-0.5'
-              } disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0`}
+                  : canPublish
+                    ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 hover:bg-emerald-600 hover:-translate-y-0.5'
+                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+              } disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0`}
             >
               {publishing ? (
                 <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -628,7 +968,7 @@ function NewCourseModal({ token, onClose, onCreate }: {
               >
                 <option value="">Select a category...</option>
                 {categories.map(cat => (
-                  <option key={cat.id} value={cat.id}>{cat.icon} {cat.name}</option>
+                  <option key={cat.id} value={cat.id}>{cat.name}</option>
                 ))}
               </select>
             </div>
@@ -687,6 +1027,7 @@ function BrowseCoursesSection() {
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<CourseOut | null>(null)
   const [search, setSearch] = useState('')
+  const [expandedMaterial, setExpandedMaterial] = useState<string | null>(null)
 
   useEffect(() => {
     listCategories().then(setCategories).catch(() => {})
@@ -771,12 +1112,31 @@ function BrowseCoursesSection() {
                 {section.materials.length > 0 && (
                   <div className="divide-y divide-slate-50">
                     {section.materials.map(m => (
-                      <div key={m.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50/50 transition-colors duration-200">
-                        <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-lg">{typeIcon[m.type] ?? '📁'}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium text-slate-900 truncate">{m.title}</div>
-                          <div className="text-xs text-slate-400 uppercase tracking-wider">{m.type}</div>
+                      <div key={m.id}>
+                        <div className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50/50 transition-colors duration-200">
+                          <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-lg">{typeIcon[m.type] ?? '📁'}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-slate-900 truncate">{m.title}</div>
+                            <div className="text-xs text-slate-400 uppercase tracking-wider">{m.type}</div>
+                          </div>
+                          {m.type === 'pdf' && m.content_text && (
+                            <button
+                              onClick={() => setExpandedMaterial(expandedMaterial === m.id ? null : m.id)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors duration-200 border-none cursor-pointer">
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                              </svg>
+                              {expandedMaterial === m.id ? 'Close' : 'Preview'}
+                            </button>
+                          )}
                         </div>
+                        {expandedMaterial === m.id && m.content_text && (
+                          <div className="px-6 py-5 bg-slate-50 border-t border-slate-100">
+                            <div className="prose-sm max-w-none text-slate-700 leading-relaxed [&>h1]:text-xl [&>h1]:font-bold [&>h1]:mb-3 [&>h1]:text-slate-900 [&>h2]:text-lg [&>h2]:font-semibold [&>h2]:mb-2 [&>h2]:text-slate-800 [&>h3]:text-base [&>h3]:font-semibold [&>h3]:mb-1.5 [&>h3]:text-slate-800 [&>p]:mb-3 [&>p]:text-[0.875rem] [&>ul]:list-disc [&>ul]:pl-5 [&>ul]:mb-3 [&>ol]:list-decimal [&>ol]:pl-5 [&>ol]:mb-3 [&>li]:mb-1 [&>li]:text-[0.875rem] [&>pre]:bg-slate-900 [&>pre]:text-slate-100 [&>pre]:rounded-lg [&>pre]:p-4 [&>pre]:mb-3 [&>pre]:overflow-x-auto [&>code]:bg-slate-200 [&>code]:px-1 [&>code]:rounded [&>code]:text-[0.8rem] [&>blockquote]:border-l-4 [&>blockquote]:border-slate-300 [&>blockquote]:pl-4 [&>blockquote]:italic [&>blockquote]:text-slate-600">
+                              <Markdown>{m.content_text}</Markdown>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -822,7 +1182,7 @@ function BrowseCoursesSection() {
                   ? 'bg-slate-900 text-white border-slate-900'
                   : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
               }`}
-            >{cat.icon} {cat.name}</button>
+            >{cat.name}</button>
           ))}
         </div>
       )}
@@ -1473,6 +1833,28 @@ export default function ProfessorDashboard() {
                 <p className="text-white/70 text-[0.95rem] max-w-xl mt-2">
                   Launch polished courses, track engagement, and keep students focused in a calmer dashboard.
                 </p>
+                {/* Affiliation badge */}
+                {user?.university_name ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-white/80 text-[0.72rem] font-semibold">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                      </svg>
+                      {user.university_name}
+                    </span>
+                    {user.region_name && (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-white/60 text-[0.72rem] font-semibold">
+                        {user.region_name}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="mt-3">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-white/40 text-[0.72rem] font-semibold">
+                      Independent professor
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="flex flex-wrap gap-3">
                 <button
@@ -1505,6 +1887,14 @@ export default function ProfessorDashboard() {
               ))}
             </div>
           </div>
+        </div>
+
+        {/* Verification banner — only for unverified professors */}
+        {user?.is_verified === false && <VerificationBanner token={token!} />}
+
+        {/* University affiliation */}
+        <div className="mb-8">
+          <UniversityCard token={token!} />
         </div>
 
         {/* Activity */}
