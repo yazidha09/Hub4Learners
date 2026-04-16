@@ -59,6 +59,154 @@ const Icons = {
 
 const BACKEND = 'http://localhost:8000'
 
+/* ───────── types for structured PDF content ───────── */
+interface PdfSection {
+  title: string
+  content: string
+  images: string[]
+}
+interface StructuredContent {
+  sections: PdfSection[]
+}
+
+/* ───────── structured PDF viewer ───────── */
+function PdfStructuredViewer({ material }: { material: MaterialOut }) {
+  const [content, setContent] = useState<StructuredContent | null>(null)
+  const [activeIdx, setActiveIdx] = useState(0)
+  const sectionRefs = useRef<(HTMLDivElement | null)[]>([])
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    setActiveIdx(0)
+    if (!material.content_text) { setContent(null); return }
+    try {
+      const parsed = JSON.parse(material.content_text)
+      if (parsed?.sections) setContent(parsed as StructuredContent)
+      else setContent(null)
+    } catch {
+      setContent(null)
+    }
+  }, [material.id, material.content_text])
+
+  /* scroll-spy: update active section as user scrolls */
+  useEffect(() => {
+    const container = scrollRef.current
+    if (!container || !content) return
+    const onScroll = () => {
+      const containerTop = container.getBoundingClientRect().top
+      let closest = 0
+      sectionRefs.current.forEach((el, i) => {
+        if (!el) return
+        const top = el.getBoundingClientRect().top - containerTop
+        if (top <= 80) closest = i
+      })
+      setActiveIdx(closest)
+    }
+    container.addEventListener('scroll', onScroll, { passive: true })
+    return () => container.removeEventListener('scroll', onScroll)
+  }, [content])
+
+  const scrollToSection = (idx: number) => {
+    const el = sectionRefs.current[idx]
+    if (el && scrollRef.current) {
+      scrollRef.current.scrollTo({ top: el.offsetTop - 16, behavior: 'smooth' })
+    }
+    setActiveIdx(idx)
+  }
+
+  /* fallback: no structured content → iframe */
+  if (!content) {
+    return (
+      <iframe
+        key={material.id}
+        src={`${BACKEND}/uploads/${material.file_url}`}
+        className="w-full h-full rounded-lg border border-[#1E2028]"
+        title={material.title}
+      />
+    )
+  }
+
+  return (
+    <div className="flex h-full overflow-hidden">
+      {/* ── section nav sidebar ── */}
+      {content.sections.length > 1 && (
+        <nav className="hidden xl:flex flex-col w-[220px] min-w-[220px] h-full bg-[#111318] border-r border-[#1E2028] overflow-y-auto py-4 px-3 gap-1 scrollbar-thin">
+          <p className="text-[0.65rem] font-bold text-[#475569] uppercase tracking-widest px-2 mb-2">
+            Sections
+          </p>
+          {content.sections.map((sec, i) => (
+            <button
+              key={i}
+              onClick={() => scrollToSection(i)}
+              className={`text-left px-3 py-2 rounded-lg text-[0.76rem] leading-snug transition-all duration-150 ${
+                activeIdx === i
+                  ? 'bg-[#FF5533]/10 text-[#FF5533] font-semibold border-l-2 border-[#FF5533]'
+                  : 'text-[#64748B] hover:text-[#CBD5E1] hover:bg-[#1A1D25]'
+              }`}
+            >
+              <span className="block truncate">{sec.title || `Section ${i + 1}`}</span>
+            </button>
+          ))}
+        </nav>
+      )}
+
+      {/* ── reading area ── */}
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto scrollbar-thin"
+      >
+        <div className="max-w-[780px] mx-auto px-6 py-8 space-y-12">
+          {content.sections.map((sec, i) => (
+            <div
+              key={i}
+              ref={el => { sectionRefs.current[i] = el }}
+            >
+              {/* section title */}
+              {sec.title && (
+                <div className="flex items-center gap-3 mb-5">
+                  <span className="flex-shrink-0 w-7 h-7 rounded-lg bg-[#FF5533]/10 flex items-center justify-center text-[#FF5533] text-[0.72rem] font-bold">
+                    {i + 1}
+                  </span>
+                  <h2 className="text-[1.15rem] font-bold text-white leading-snug">
+                    {sec.title}
+                  </h2>
+                </div>
+              )}
+
+              {/* images */}
+              {sec.images.length > 0 && (
+                <div className="space-y-4 mb-5">
+                  {sec.images.map((url, j) => (
+                    <img
+                      key={j}
+                      src={url}
+                      alt={`${sec.title} image ${j + 1}`}
+                      className="w-full max-w-[640px] rounded-xl border border-[#1E2028] shadow-lg object-contain bg-[#111318]"
+                      loading="lazy"
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* body text */}
+              {sec.content && (
+                <div className="text-[0.875rem] text-[#94A3B8] leading-7 whitespace-pre-wrap">
+                  {sec.content}
+                </div>
+              )}
+
+              {/* divider between sections */}
+              {i < content.sections.length - 1 && (
+                <div className="mt-10 border-t border-[#1E2028]" />
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function CourseLearningPage() {
   const { courseId } = useParams<{ courseId: string }>()
   const { token } = useAuth()
@@ -380,12 +528,7 @@ export default function CourseLearningPage() {
                     </video>
                   </div>
                 ) : activeMaterial.type === 'pdf' ? (
-                  <iframe
-                    key={activeMaterial.id}
-                    src={materialUrl}
-                    className="w-full h-full rounded-lg border border-[#1E2028]"
-                    title={activeMaterial.title}
-                  />
+                  <PdfStructuredViewer material={activeMaterial} />
                 ) : (
                   /* audio, exercise, link fallback */
                   <div className="h-full flex flex-col items-center justify-center gap-4">
