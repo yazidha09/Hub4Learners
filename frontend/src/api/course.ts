@@ -137,3 +137,7 @@ export function getMyStudents(token: string): Promise<CourseStudentsOut[]> {
 export function unenrollFromCourse(token: string, courseId: string): Promise<{ detail: string }> {
   return request<{ detail: string }>(`/courses/${courseId}/enroll`, token, { method: 'DELETE' })
 }
+
+export function deleteCourse(token: string, courseId: string): Promise<{ detail: string }> {
+  return request<{ detail: string }>(`/courses/${courseId}`, token, { method: 'DELETE' })
+}

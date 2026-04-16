@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import Markdown from 'react-markdown'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import DashboardLayout, { type NavItem } from '../components/DashboardLayout'
 import {
   getMyCourses, createCourse, addSection, uploadMaterial, togglePublish, listPublishedCourses,
-  getMyStudents,
+  getMyStudents, getEnrolledCourses, enrollInCourse, unenrollFromCourse, deleteCourse,
   type CourseOut, type SectionOut, type CourseStudentsOut,
 } from '../api/course'
 import { listCategories, type CategoryOut } from '../api/category'
@@ -50,11 +51,17 @@ const ChatIcon = () => (
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
   </svg>
 )
+const GraduationCapIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" />
+  </svg>
+)
 
 const NAV: NavItem[] = [
   { id: 'home', label: 'Home', icon: <HomeIcon /> },
   { id: 'courses', label: 'Courses', icon: <BookIcon /> },
   { id: 'my-courses', label: 'My Courses', icon: <FolderIcon /> },
+  { id: 'my-learning', label: 'My Learning', icon: <GraduationCapIcon /> },
   { id: 'students', label: 'Students', icon: <UsersIcon /> },
   { id: 'chat', label: 'Chat Requests', icon: <ChatIcon /> },
   { id: 'analytics', label: 'Analytics', icon: <TrendIcon /> },
@@ -580,6 +587,8 @@ function CourseManager({ token, course, onBack, onRefresh }: {
   const [publishing, setPublishing] = useState(false)
   const [publishErr, setPublishErr] = useState('')
   const [current, setCurrent] = useState(course)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const refresh = async () => {
     const courses = await getMyCourses(token)
@@ -607,6 +616,17 @@ function CourseManager({ token, course, onBack, onRefresh }: {
     } catch (e: any) {
       setPublishErr(e.message || 'Could not toggle publish')
     } finally { setPublishing(false) }
+  }
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    try {
+      await deleteCourse(token, current.id)
+      onBack()
+    } finally {
+      setDeleting(false)
+      setShowDeleteConfirm(false)
+    }
   }
 
   const canPublish = user?.is_verified !== false || current.is_published
@@ -653,9 +673,19 @@ function CourseManager({ token, course, onBack, onRefresh }: {
             </div>
           </div>
           <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="flex items-center gap-2 px-3 py-2.5 text-sm font-semibold text-red-600 bg-red-50 rounded-xl border border-red-100 hover:bg-red-100 transition-all duration-200"
+              title="Delete this course"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+              </svg>
+              Delete
+            </button>
             <span className={`inline-flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-full border transition-all duration-200 ${
-              current.is_published 
-                ? 'bg-emerald-50 text-emerald-600 border-emerald-200' 
+              current.is_published
+                ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
                 : 'bg-slate-100 text-slate-500 border-slate-200'
             }`}>
               <span className={`w-2 h-2 rounded-full ${current.is_published ? 'bg-emerald-500' : 'bg-slate-400'}`} />
@@ -833,6 +863,45 @@ function CourseManager({ token, course, onBack, onRefresh }: {
           </button>
         </form>
       </div>
+
+      {/* Delete confirmation modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+            <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+              <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+              </svg>
+            </div>
+            <h3 className="text-base font-bold text-slate-900 text-center mb-1">Delete course?</h3>
+            <p className="text-sm text-slate-500 text-center mb-6">
+              <span className="font-semibold text-slate-700">"{current.title}"</span> and all its sections, materials, and enrollments will be permanently deleted.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deleting}
+                className="flex-1 h-10 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors duration-200 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="flex-1 h-10 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors duration-200 disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {deleting ? (
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                ) : null}
+                {deleting ? 'Deleting…' : 'Delete course'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1020,7 +1089,8 @@ function NewCourseModal({ token, onClose, onCreate }: {
 }
 
 /* ── Browse Courses Section (professor view) ── */
-function BrowseCoursesSection() {
+function BrowseCoursesSection({ token, currentUserId }: { token: string; currentUserId: string }) {
+  const navigate = useNavigate()
   const [courses, setCourses] = useState<CourseOut[]>([])
   const [categories, setCategories] = useState<CategoryOut[]>([])
   const [activeCat, setActiveCat] = useState<string>('')
@@ -1028,15 +1098,31 @@ function BrowseCoursesSection() {
   const [selected, setSelected] = useState<CourseOut | null>(null)
   const [search, setSearch] = useState('')
   const [expandedMaterial, setExpandedMaterial] = useState<string | null>(null)
+  const [enrolledIds, setEnrolledIds] = useState<Set<string>>(new Set())
+  const [enrollingId, setEnrollingId] = useState<string | null>(null)
+  const [err, setErr] = useState('')
 
   useEffect(() => {
     listCategories().then(setCategories).catch(() => {})
-  }, [])
+    getEnrolledCourses(token).then(list => setEnrolledIds(new Set(list.map(c => c.id)))).catch(() => {})
+  }, [token])
 
   useEffect(() => {
     setLoading(true)
     listPublishedCourses(activeCat || undefined).then(setCourses).finally(() => setLoading(false))
   }, [activeCat])
+
+  const handleEnroll = async (courseId: string) => {
+    setEnrollingId(courseId); setErr('')
+    try {
+      await enrollInCourse(token, courseId)
+      setEnrolledIds(prev => new Set(prev).add(courseId))
+    } catch (e: any) {
+      setErr(e.message || 'Could not enroll')
+    } finally {
+      setEnrollingId(null)
+    }
+  }
 
   const filtered = courses.filter(c =>
     !search.trim() ||
@@ -1083,6 +1169,38 @@ function BrowseCoursesSection() {
               {selected.enrolled_count} student{selected.enrolled_count !== 1 ? 's' : ''} enrolled
             </span>
           </div>
+          {selected.professor_id !== currentUserId && (
+            <div className="mt-5 flex items-center gap-3 flex-wrap">
+              {enrolledIds.has(selected.id) ? (
+                <button
+                  onClick={() => navigate(`/learn/${selected.id}`)}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#0C0C0F] text-white rounded-xl text-sm font-semibold hover:bg-[#1E1E23] transition-colors duration-200 border-none cursor-pointer">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <polygon strokeLinecap="round" strokeLinejoin="round" points="5 3 19 12 5 21 5 3" />
+                  </svg>
+                  Start Learning
+                </button>
+              ) : (
+                <button
+                  onClick={() => handleEnroll(selected.id)}
+                  disabled={enrollingId === selected.id}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-[#FF5533] to-[#e5482b] text-white rounded-xl text-sm font-semibold hover:shadow-md border-none cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-200">
+                  {enrollingId === selected.id ? 'Enrolling...' : 'Enroll in this course'}
+                </button>
+              )}
+              {err && <span className="text-xs text-red-500">{err}</span>}
+            </div>
+          )}
+          {selected.professor_id === currentUserId && (
+            <div className="mt-5">
+              <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-50 text-violet-600 border border-violet-200 text-xs font-semibold">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5" />
+                </svg>
+                Your course
+              </span>
+            </div>
+          )}
         </div>
         
         {/* Course Content */}
@@ -1254,10 +1372,31 @@ function BrowseCoursesSection() {
                 {c.description && (
                   <p className="text-xs text-slate-400 leading-relaxed line-clamp-2 mb-3">{c.description}</p>
                 )}
-                <div className="flex items-center gap-3 pt-2 border-t border-slate-100 text-xs text-slate-400">
-                  <span>{c.sections.length} section{c.sections.length !== 1 ? 's' : ''}</span>
-                  <span>·</span>
-                  <span>{c.enrolled_count} student{c.enrolled_count !== 1 ? 's' : ''}</span>
+                <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-100 text-xs">
+                  <div className="flex items-center gap-3 text-slate-400 min-w-0">
+                    <span>{c.sections.length} section{c.sections.length !== 1 ? 's' : ''}</span>
+                    <span>·</span>
+                    <span>{c.enrolled_count} student{c.enrolled_count !== 1 ? 's' : ''}</span>
+                  </div>
+                  {c.professor_id === currentUserId ? (
+                    <span className="shrink-0 text-[10px] font-semibold text-violet-600 bg-violet-50 px-2 py-1 rounded-full uppercase tracking-wide">
+                      Your course
+                    </span>
+                  ) : enrolledIds.has(c.id) ? (
+                    <span className="shrink-0 flex items-center gap-1 text-xs font-semibold text-emerald-600">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                      Enrolled
+                    </span>
+                  ) : (
+                    <button
+                      onClick={e => { e.stopPropagation(); handleEnroll(c.id) }}
+                      disabled={!!enrollingId}
+                      className="shrink-0 px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-[#FF5533] to-[#e5482b] text-white rounded-lg border-none cursor-pointer shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200">
+                      {enrollingId === c.id ? '...' : 'Enroll'}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -1758,6 +1897,124 @@ function MyStudentsSection({ token }: { token: string }) {
   )
 }
 
+/* ── My Learning Section (professor's own enrolled courses) ── */
+function MyLearningSection({ token }: { token: string }) {
+  const navigate = useNavigate()
+  const [enrolled, setEnrolled] = useState<CourseOut[]>([])
+  const [loading, setLoading] = useState(true)
+  const [confirmUnenroll, setConfirmUnenroll] = useState<string | null>(null)
+  const [unenrolling, setUnenrolling] = useState(false)
+  const [unenrollErr, setUnenrollErr] = useState('')
+
+  useEffect(() => {
+    setLoading(true)
+    getEnrolledCourses(token).then(setEnrolled).finally(() => setLoading(false))
+  }, [token])
+
+  const handleUnenroll = async (courseId: string) => {
+    setUnenrolling(true); setUnenrollErr('')
+    try {
+      await unenrollFromCourse(token, courseId)
+      setEnrolled(prev => prev.filter(c => c.id !== courseId))
+      setConfirmUnenroll(null)
+    } catch (e: any) {
+      setUnenrollErr(e.message || 'Could not remove course')
+    } finally {
+      setUnenrolling(false)
+    }
+  }
+
+  return (
+    <div className="max-w-[800px] animate-fadeIn">
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold text-slate-900 tracking-tight">My Learning</h2>
+        <p className="text-sm text-slate-500 mt-1">Courses you're enrolled in as a learner</p>
+      </div>
+
+      {unenrollErr && (
+        <div className="mb-4 px-4 py-2.5 rounded-lg text-sm text-red-600 bg-red-50 border border-red-200">{unenrollErr}</div>
+      )}
+
+      {loading ? (
+        <div className="space-y-4">
+          {[...Array(3)].map((_, i) => <div key={i} className="h-24 rounded-2xl skeleton" />)}
+        </div>
+      ) : enrolled.length === 0 ? (
+        <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-200">
+          <div className="w-14 h-14 mx-auto mb-4 bg-slate-100 rounded-2xl flex items-center justify-center">
+            <svg className="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5" />
+            </svg>
+          </div>
+          <p className="text-base font-semibold text-slate-900 mb-1">Not enrolled in any course yet</p>
+          <p className="text-sm text-slate-500">Browse the catalog and enroll to keep learning alongside teaching</p>
+        </div>
+      ) : (
+        <div className="space-y-3 stagger-children">
+          {enrolled.map(c => (
+            <div key={c.id}
+              onClick={() => navigate(`/learn/${c.id}`)}
+              className="group bg-white rounded-2xl border border-slate-200/80 p-5 cursor-pointer shadow-[0_2px_12px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.1)] hover:border-slate-300 hover:-translate-y-0.5 transition-all duration-300">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-slate-100 to-slate-50 flex items-center justify-center shrink-0 overflow-hidden">
+                  {c.thumbnail ? (
+                    <img src={`http://localhost:8000/uploads/${c.thumbnail}`} alt={c.title} className="w-full h-full object-cover" />
+                  ) : (
+                    <svg className="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                    </svg>
+                  )}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-semibold text-slate-900 truncate group-hover:text-[#FF5533] transition-colors duration-200">{c.title}</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">by {c.professor_name}</p>
+                </div>
+
+                <div className="text-right shrink-0 flex items-center gap-3">
+                  <div>
+                    <div className="text-xs text-slate-400">{c.sections.length} section{c.sections.length !== 1 ? 's' : ''}</div>
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 mt-0.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      Active
+                    </span>
+                  </div>
+                  {confirmUnenroll === c.id ? (
+                    <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                      <button
+                        onClick={() => handleUnenroll(c.id)}
+                        disabled={unenrolling}
+                        className="px-2.5 py-1 text-[11px] font-semibold text-white bg-red-500 hover:bg-red-600 rounded-lg border-none cursor-pointer disabled:opacity-50 transition-colors duration-200"
+                      >{unenrolling ? '...' : 'Remove'}</button>
+                      <button
+                        onClick={() => setConfirmUnenroll(null)}
+                        className="px-2.5 py-1 text-[11px] font-semibold text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-lg border-none cursor-pointer transition-colors duration-200"
+                      >No</button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={e => { e.stopPropagation(); setConfirmUnenroll(c.id) }}
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-red-400 hover:bg-red-50 border-none bg-transparent cursor-pointer transition-all duration-200"
+                      title="Unenroll from this course"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                  <svg className="w-5 h-5 text-slate-300 group-hover:text-slate-500 transition-colors duration-200" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ── Main Dashboard ── */
 export default function ProfessorDashboard() {
   const { user, token } = useAuth()
@@ -1768,7 +2025,17 @@ export default function ProfessorDashboard() {
     return (
       <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Professor">
         <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
-          <BrowseCoursesSection />
+          <BrowseCoursesSection token={token!} currentUserId={user!.id} />
+        </div>
+      </DashboardLayout>
+    )
+  }
+
+  if (nav === 'my-learning') {
+    return (
+      <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Professor">
+        <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
+          <MyLearningSection token={token!} />
         </div>
       </DashboardLayout>
     )

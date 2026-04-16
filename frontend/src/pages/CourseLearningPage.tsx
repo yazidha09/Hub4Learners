@@ -106,10 +106,10 @@ export default function CourseLearningPage() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, aiTyping])
 
-  /* ── send chat message (placeholder — will connect to RAG API later) ── */
-  const sendMessage = () => {
+  /* ── send chat message → Gemini AI via backend ── */
+  const sendMessage = async () => {
     const text = chatInput.trim()
-    if (!text) return
+    if (!text || aiTyping) return
 
     const userMsg: ChatMessage = {
       id: crypto.randomUUID(),
@@ -121,18 +121,47 @@ export default function CourseLearningPage() {
     setChatInput('')
     setAiTyping(true)
 
-    // Simulated AI response — will be replaced with actual RAG API call
-    setTimeout(() => {
-      const aiMsg: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content:
-          "I'm the Hub4Learners AI assistant. I'll be able to answer questions about this course's materials once the RAG system is connected. For now, feel free to take notes here!",
-        timestamp: new Date(),
-      }
-      setMessages((prev) => [...prev, aiMsg])
+    // Build history for the API (all previous turns, role mapped to "user"/"assistant")
+    const history = messages.map((m) => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: m.content,
+    }))
+
+    try {
+      const res = await fetch('http://localhost:8000/api/ai/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          course_id: courseId,
+          message: text,
+          history,
+        }),
+      })
+      const data = await res.json()
+      const reply: string = res.ok
+        ? (data.reply ?? 'No response from AI.')
+        : (data.detail ?? 'AI request failed.')
+
+      setMessages((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() },
+      ])
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Could not reach the AI. Check your connection and try again.',
+          timestamp: new Date(),
+        },
+      ])
+    } finally {
       setAiTyping(false)
-    }, 1200)
+    }
   }
 
   /* ── select material ── */
@@ -351,7 +380,6 @@ export default function CourseLearningPage() {
                     </video>
                   </div>
                 ) : activeMaterial.type === 'pdf' ? (
-                  /* ── native PDF viewer ── */
                   <iframe
                     key={activeMaterial.id}
                     src={materialUrl}
@@ -438,14 +466,42 @@ export default function CourseLearningPage() {
                 {/* quick prompts */}
                 <div className="mt-5 space-y-2 w-full">
                   {[
-                    'Summarize this material',
+                    activeMaterial ? `Summarize "${activeMaterial.title}"` : 'Summarize this material',
                     'What are the key concepts?',
-                    'Explain the main topic',
+                    'Give me a quick quiz on this section',
                   ].map((prompt) => (
                     <button
                       key={prompt}
-                      onClick={() => {
+                      onClick={async () => {
                         setChatInput(prompt)
+                        // small delay so state flushes before sendMessage reads it
+                        await new Promise(r => setTimeout(r, 0))
+                        const userMsg: ChatMessage = {
+                          id: crypto.randomUUID(),
+                          role: 'user',
+                          content: prompt,
+                          timestamp: new Date(),
+                        }
+                        setMessages((prev) => [...prev, userMsg])
+                        setChatInput('')
+                        setAiTyping(true)
+                        try {
+                          const res = await fetch('http://localhost:8000/api/ai/chat', {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                            },
+                            body: JSON.stringify({ course_id: courseId, message: prompt, history: [] }),
+                          })
+                          const data = await res.json()
+                          const reply: string = res.ok ? (data.reply ?? 'No response.') : (data.detail ?? 'Error.')
+                          setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: reply, timestamp: new Date() }])
+                        } catch {
+                          setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: 'Could not reach the AI.', timestamp: new Date() }])
+                        } finally {
+                          setAiTyping(false)
+                        }
                       }}
                       className="w-full px-3 py-2 text-left text-[0.78rem] text-[#94A3B8] bg-[#1A1D25] rounded-lg hover:bg-[#1E2028] hover:text-[#E2E8F0] transition-colors border border-[#1E2028]"
                     >
@@ -471,7 +527,23 @@ export default function CourseLearningPage() {
                     }
                   `}
                 >
-                  <p className="text-[0.82rem] leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                  {msg.role === 'assistant' ? (
+                    <div className="text-[0.82rem] leading-relaxed
+                      [&>p]:mb-2 [&>p]:last:mb-0
+                      [&>ul]:list-disc [&>ul]:pl-4 [&>ul]:mb-2 [&>ul]:space-y-0.5
+                      [&>ol]:list-decimal [&>ol]:pl-4 [&>ol]:mb-2 [&>ol]:space-y-0.5
+                      [&_li]:text-[0.8rem]
+                      [&>h1]:text-sm [&>h1]:font-bold [&>h1]:mb-1
+                      [&>h2]:text-sm [&>h2]:font-semibold [&>h2]:mb-1
+                      [&>h3]:text-[0.8rem] [&>h3]:font-semibold [&>h3]:mb-1
+                      [&_strong]:text-white [&_strong]:font-semibold
+                      [&_code]:bg-[#0C0C0F] [&_code]:text-[#FF5533] [&_code]:px-1 [&_code]:rounded [&_code]:text-[0.75rem]
+                      [&>pre]:bg-[#0C0C0F] [&>pre]:rounded [&>pre]:p-2 [&>pre]:mb-2 [&>pre]:overflow-x-auto [&>pre]:text-[0.75rem]">
+                      <Markdown>{msg.content}</Markdown>
+                    </div>
+                  ) : (
+                    <p className="text-[0.82rem] leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                  )}
                   <span
                     className={`block text-[0.6rem] mt-1 ${msg.role === 'user' ? 'text-white/60' : 'text-[#475569]'}`}
                   >

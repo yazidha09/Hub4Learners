@@ -16,6 +16,7 @@ from app.schemas.course import (
     CourseOut, SectionOut, SectionCreate, MaterialOut, EnrollmentOut,
     StudentOut, CourseStudentsOut,
 )
+from app.utils.embeddings import embed_and_store_material
 
 THUMBNAILS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "uploads", "thumbnails")
 MATERIALS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "uploads", "materials")
@@ -210,6 +211,23 @@ def upload_material(
     db.add(material)
     db.commit()
     db.refresh(material)
+
+    # ── RAG: embed and store chunks for PDF materials with extracted text ──
+    if content_text and mat_type == "pdf":
+        section = db.query(CourseSection).filter(CourseSection.id == UUID(section_id)).first()
+        section_title = section.title if section else ""
+        try:
+            embed_and_store_material(
+                material_id=str(material.id),
+                course_id=str(course.id),
+                section_title=section_title,
+                material_title=title,
+                content_text=content_text,
+                db=db,
+            )
+        except Exception:
+            pass  # embedding failure must never break the upload response
+
     return MaterialOut(
         id=material.id,
         section_id=material.section_id,
@@ -220,6 +238,17 @@ def upload_material(
         order_index=material.order_index,
         created_at=material.created_at,
     )
+
+
+def delete_course(professor_id: str, course_id: str, db: Session) -> dict:
+    course = db.query(Course).filter(Course.id == UUID(course_id)).first()
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    if str(course.professor_id) != professor_id:
+        raise HTTPException(status_code=403, detail="Not your course")
+    db.delete(course)
+    db.commit()
+    return {"detail": "Course deleted successfully"}
 
 
 def toggle_publish(professor_id: str, course_id: str, db: Session) -> CourseOut:
@@ -269,6 +298,8 @@ def enroll_student(student_id: str, course_id: str, db: Session) -> EnrollmentOu
         raise HTTPException(status_code=400, detail="Course is not published")
     if not course.is_free:
         raise HTTPException(status_code=400, detail="Paid courses are not available yet")
+    if str(course.professor_id) == student_id:
+        raise HTTPException(status_code=400, detail="You cannot enroll in your own course")
 
     existing = (
         db.query(Enrollment)

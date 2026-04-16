@@ -22,4 +22,5 @@ dependencies = [
     "openai==1.14.3",
     "email-validator>=2.3.0",
     "requests>=2.33.1",
+    "pymupdf>=1.27.2.2",
 ]

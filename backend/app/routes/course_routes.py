@@ -85,6 +85,15 @@ def get_my_students(
     return course_controller.get_my_students(current_user["sub"], db)
 
 
+@router.delete("/{course_id}")
+def delete_course(
+    course_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_role("professor")),
+):
+    return course_controller.delete_course(current_user["sub"], course_id, db)
+
+
 @router.patch("/{course_id}/publish", response_model=CourseOut)
 def toggle_publish(
     course_id: str,
