@@ -1,7 +1,16 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { Document, Page, pdfjs } from 'react-pdf'
+import 'react-pdf/dist/Page/AnnotationLayer.css'
+import 'react-pdf/dist/Page/TextLayer.css'
+import ReactMarkdown from 'react-markdown'
 import { useAuth } from '../context/AuthContext'
 import { getCourseDetail, type CourseOut, type MaterialOut, type SectionOut } from '../api/course'
+
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).toString()
 
 /* ───────── chat message type (prepared for AI) ───────── */
 interface ChatMessage {
@@ -59,149 +68,147 @@ const Icons = {
 
 const BACKEND = 'http://localhost:8000'
 
-/* ───────── types for structured PDF content ───────── */
-interface PdfSection {
-  title: string
-  content: string
-  images: string[]
-}
-interface StructuredContent {
-  sections: PdfSection[]
-}
+/* ─────────────────────────────────────────────────────────────────────────────
+   PDF Viewer component
+   ───────────────────────────────────────────────────────────────────────────── */
+function PdfViewer({ url }: { url: string }) {
+  const [numPages, setNumPages]       = useState(0)
+  const [scale, setScale]             = useState(1.3)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [docLoading, setDocLoading]   = useState(true)
+  const scrollRef  = useRef<HTMLDivElement>(null)
+  const pageRefs   = useRef<Map<number, Element>>(new Map())
+  const observerRef = useRef<IntersectionObserver | null>(null)
 
-/* ───────── structured PDF viewer ───────── */
-function PdfStructuredViewer({ material }: { material: MaterialOut }) {
-  const [content, setContent] = useState<StructuredContent | null>(null)
-  const [activeIdx, setActiveIdx] = useState(0)
-  const sectionRefs = useRef<(HTMLDivElement | null)[]>([])
-  const scrollRef = useRef<HTMLDivElement>(null)
+  /* zoom helpers */
+  const zoomIn  = () => setScale(s => Math.min(3.0, +(s + 0.2).toFixed(1)))
+  const zoomOut = () => setScale(s => Math.max(0.4, +(s - 0.2).toFixed(1)))
+  const fitWidth = useCallback(() => {
+    if (!scrollRef.current) return
+    const available = scrollRef.current.clientWidth - 48   // subtract padding
+    setScale(+(available / 816).toFixed(2))                // 816px ≈ A4 at 96 dpi
+  }, [])
 
+  /* reset when URL changes */
   useEffect(() => {
-    setActiveIdx(0)
-    if (!material.content_text) { setContent(null); return }
-    try {
-      const parsed = JSON.parse(material.content_text)
-      if (parsed?.sections) setContent(parsed as StructuredContent)
-      else setContent(null)
-    } catch {
-      setContent(null)
-    }
-  }, [material.id, material.content_text])
+    setNumPages(0)
+    setCurrentPage(1)
+    setDocLoading(true)
+    pageRefs.current.clear()
+  }, [url])
 
-  /* scroll-spy: update active section as user scrolls */
+  /* scroll-spy: track which page is most visible */
   useEffect(() => {
-    const container = scrollRef.current
-    if (!container || !content) return
-    const onScroll = () => {
-      const containerTop = container.getBoundingClientRect().top
-      let closest = 0
-      sectionRefs.current.forEach((el, i) => {
-        if (!el) return
-        const top = el.getBoundingClientRect().top - containerTop
-        if (top <= 80) closest = i
-      })
-      setActiveIdx(closest)
-    }
-    container.addEventListener('scroll', onScroll, { passive: true })
-    return () => container.removeEventListener('scroll', onScroll)
-  }, [content])
-
-  const scrollToSection = (idx: number) => {
-    const el = sectionRefs.current[idx]
-    if (el && scrollRef.current) {
-      scrollRef.current.scrollTo({ top: el.offsetTop - 16, behavior: 'smooth' })
-    }
-    setActiveIdx(idx)
-  }
-
-  /* fallback: no structured content → iframe */
-  if (!content) {
-    return (
-      <iframe
-        key={material.id}
-        src={`${BACKEND}/uploads/${material.file_url}`}
-        className="w-full h-full rounded-lg border border-[#1E2028]"
-        title={material.title}
-      />
+    if (!numPages || !scrollRef.current) return
+    observerRef.current?.disconnect()
+    observerRef.current = new IntersectionObserver(
+      entries => {
+        let best = { ratio: 0, page: currentPage }
+        entries.forEach(e => {
+          const p = parseInt(e.target.getAttribute('data-page') ?? '1')
+          if (e.intersectionRatio > best.ratio) best = { ratio: e.intersectionRatio, page: p }
+        })
+        if (best.ratio > 0) setCurrentPage(best.page)
+      },
+      { root: scrollRef.current, threshold: [0, 0.25, 0.5, 0.75, 1] },
     )
+    pageRefs.current.forEach(el => observerRef.current!.observe(el))
+    return () => observerRef.current?.disconnect()
+  }, [numPages, scale])
+
+  const setPageRef = (page: number) => (el: Element | null) => {
+    if (el) pageRefs.current.set(page, el)
+    else    pageRefs.current.delete(page)
   }
 
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* ── section nav sidebar ── */}
-      {content.sections.length > 1 && (
-        <nav className="hidden xl:flex flex-col w-[220px] min-w-[220px] h-full bg-[#111318] border-r border-[#1E2028] overflow-y-auto py-4 px-3 gap-1 scrollbar-thin">
-          <p className="text-[0.65rem] font-bold text-[#475569] uppercase tracking-widest px-2 mb-2">
-            Sections
-          </p>
-          {content.sections.map((sec, i) => (
-            <button
-              key={i}
-              onClick={() => scrollToSection(i)}
-              className={`text-left px-3 py-2 rounded-lg text-[0.76rem] leading-snug transition-all duration-150 ${
-                activeIdx === i
-                  ? 'bg-[#FF5533]/10 text-[#FF5533] font-semibold border-l-2 border-[#FF5533]'
-                  : 'text-[#64748B] hover:text-[#CBD5E1] hover:bg-[#1A1D25]'
-              }`}
-            >
-              <span className="block truncate">{sec.title || `Section ${i + 1}`}</span>
-            </button>
-          ))}
-        </nav>
-      )}
+    <div className="flex flex-col h-full bg-[#0C0C0F]">
 
-      {/* ── reading area ── */}
+      {/* ── toolbar ── */}
+      <div className="shrink-0 flex items-center justify-between gap-4 px-4 py-2
+                      bg-[#111318] border-b border-[#1E2028]">
+        {/* zoom controls */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={zoomOut}
+            className="w-7 h-7 rounded-md bg-[#1A1D25] hover:bg-[#222530] text-[#94A3B8]
+                       hover:text-white flex items-center justify-center text-lg leading-none
+                       transition-colors duration-150 font-light select-none"
+            title="Zoom out"
+          >−</button>
+
+          <span className="w-14 text-center text-[0.75rem] font-mono text-[#94A3B8] tabular-nums select-none">
+            {Math.round(scale * 100)}%
+          </span>
+
+          <button
+            onClick={zoomIn}
+            className="w-7 h-7 rounded-md bg-[#1A1D25] hover:bg-[#222530] text-[#94A3B8]
+                       hover:text-white flex items-center justify-center text-lg leading-none
+                       transition-colors duration-150 font-light select-none"
+            title="Zoom in"
+          >+</button>
+
+          <button
+            onClick={fitWidth}
+            className="ml-1 px-2.5 h-7 rounded-md bg-[#1A1D25] hover:bg-[#222530]
+                       text-[0.7rem] text-[#64748B] hover:text-[#94A3B8]
+                       transition-colors duration-150 select-none"
+            title="Fit to width"
+          >
+            Fit
+          </button>
+        </div>
+
+        {/* page counter */}
+        {numPages > 0 && (
+          <span className="text-[0.72rem] text-[#475569] font-mono tabular-nums select-none">
+            {currentPage} <span className="text-[#2D3748]">/</span> {numPages}
+          </span>
+        )}
+      </div>
+
+      {/* ── scrollable pages ── */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto scrollbar-thin"
+        className="flex-1 overflow-y-auto overflow-x-auto bg-[#181B22] scrollbar-thin"
       >
-        <div className="max-w-[780px] mx-auto px-6 py-8 space-y-12">
-          {content.sections.map((sec, i) => (
-            <div
-              key={i}
-              ref={el => { sectionRefs.current[i] = el }}
-            >
-              {/* section title */}
-              {sec.title && (
-                <div className="flex items-center gap-3 mb-5">
-                  <span className="flex-shrink-0 w-7 h-7 rounded-lg bg-[#FF5533]/10 flex items-center justify-center text-[#FF5533] text-[0.72rem] font-bold">
-                    {i + 1}
-                  </span>
-                  <h2 className="text-[1.15rem] font-bold text-white leading-snug">
-                    {sec.title}
-                  </h2>
-                </div>
-              )}
+        {/* loading state */}
+        {docLoading && (
+          <div className="flex items-center justify-center h-full min-h-[300px] gap-3">
+            <div className="w-5 h-5 border-2 border-[#FF5533] border-t-transparent rounded-full animate-spin" />
+            <span className="text-[0.8rem] text-[#475569]">Loading PDF…</span>
+          </div>
+        )}
 
-              {/* images */}
-              {sec.images.length > 0 && (
-                <div className="space-y-4 mb-5">
-                  {sec.images.map((url, j) => (
-                    <img
-                      key={j}
-                      src={url}
-                      alt={`${sec.title} image ${j + 1}`}
-                      className="w-full max-w-[640px] rounded-xl border border-[#1E2028] shadow-lg object-contain bg-[#111318]"
-                      loading="lazy"
-                    />
-                  ))}
+        <Document
+          file={url}
+          onLoadSuccess={({ numPages: n }) => { setNumPages(n); setDocLoading(false) }}
+          onLoadError={() => setDocLoading(false)}
+          loading={null}
+          className={docLoading ? 'hidden' : undefined}
+        >
+          <div className="flex flex-col items-center py-6 gap-3 px-6">
+            {Array.from({ length: numPages }, (_, i) => {
+              const pageNum = i + 1
+              return (
+                <div
+                  key={pageNum}
+                  data-page={pageNum}
+                  ref={setPageRef(pageNum)}
+                  className="shadow-[0_4px_24px_rgba(0,0,0,0.5)] rounded-sm overflow-hidden"
+                >
+                  <Page
+                    pageNumber={pageNum}
+                    scale={scale}
+                    renderAnnotationLayer
+                    renderTextLayer
+                  />
                 </div>
-              )}
-
-              {/* body text */}
-              {sec.content && (
-                <div className="text-[0.875rem] text-[#94A3B8] leading-7 whitespace-pre-wrap">
-                  {sec.content}
-                </div>
-              )}
-
-              {/* divider between sections */}
-              {i < content.sections.length - 1 && (
-                <div className="mt-10 border-t border-[#1E2028]" />
-              )}
-            </div>
-          ))}
-        </div>
+              )
+            })}
+          </div>
+        </Document>
       </div>
     </div>
   )
@@ -209,7 +216,7 @@ function PdfStructuredViewer({ material }: { material: MaterialOut }) {
 
 export default function CourseLearningPage() {
   const { courseId } = useParams<{ courseId: string }>()
-  const { token } = useAuth()
+  const { token, user } = useAuth()
   const navigate = useNavigate()
 
   const [course, setCourse] = useState<CourseOut | null>(null)
@@ -229,6 +236,10 @@ export default function CourseLearningPage() {
   const [chatInput, setChatInput] = useState('')
   const [aiTyping, setAiTyping] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
+
+  /* ── reindex state (professor only) ── */
+  const [reindexing, setReindexing] = useState(false)
+  const [reindexMsg, setReindexMsg] = useState('')
 
   /* ── fetch course ── */
   useEffect(() => {
@@ -309,6 +320,30 @@ export default function CourseLearningPage() {
       ])
     } finally {
       setAiTyping(false)
+    }
+  }
+
+  /* ── reindex course AI (professor only) ── */
+  const handleReindex = async () => {
+    if (!courseId || !token || reindexing) return
+    setReindexing(true)
+    setReindexMsg('')
+    try {
+      const res = await fetch(`http://localhost:8000/api/ai/reindex/${courseId}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+      if (res.ok) {
+        const n = data.chunks_stored ?? 0
+        setReindexMsg(n > 0 ? `✓ Indexed ${n} chunks — AI is ready.` : '⚠ No text found in PDFs.')
+      } else {
+        setReindexMsg(`Error: ${data.detail ?? 'Reindex failed.'}`)
+      }
+    } catch {
+      setReindexMsg('Could not reach the server.')
+    } finally {
+      setReindexing(false)
     }
   }
 
@@ -514,9 +549,9 @@ export default function CourseLearningPage() {
               </div>
 
               {/* viewer area */}
-              <div className="flex-1 overflow-hidden p-4">
+              <div className="flex-1 overflow-hidden">
                 {activeMaterial.type === 'video' ? (
-                  <div className="h-full flex items-center justify-center">
+                  <div className="h-full flex items-center justify-center p-4">
                     <video
                       key={activeMaterial.id}
                       controls
@@ -528,7 +563,7 @@ export default function CourseLearningPage() {
                     </video>
                   </div>
                 ) : activeMaterial.type === 'pdf' ? (
-                  <PdfStructuredViewer material={activeMaterial} />
+                  <PdfViewer key={activeMaterial.id} url={materialUrl} />
                 ) : (
                   /* audio, exercise, link fallback */
                   <div className="h-full flex flex-col items-center justify-center gap-4">
@@ -575,20 +610,44 @@ export default function CourseLearningPage() {
           `}
         >
           {/* chat header */}
-          <div className="px-4 py-3 border-b border-[#1E2028] flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#FF5533] to-[#FF7755] flex items-center justify-center text-white">
-              {Icons.ai}
+          <div className="px-4 py-3 border-b border-[#1E2028] flex flex-col gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#FF5533] to-[#FF7755] flex items-center justify-center text-white">
+                {Icons.ai}
+              </div>
+              <div className="flex-1">
+                <h2 className="text-[0.82rem] font-semibold text-[#E2E8F0]">AI Assistant</h2>
+                <p className="text-[0.65rem] text-[#64748B]">Ask about this course material</p>
+              </div>
+              <button
+                onClick={() => setShowChat(false)}
+                className="lg:hidden p-1 rounded hover:bg-[#1E2028] text-[#64748B]"
+              >
+                {Icons.close}
+              </button>
             </div>
-            <div className="flex-1">
-              <h2 className="text-[0.82rem] font-semibold text-[#E2E8F0]">AI Assistant</h2>
-              <p className="text-[0.65rem] text-[#64748B]">Ask about this course material</p>
-            </div>
-            <button
-              onClick={() => setShowChat(false)}
-              className="lg:hidden p-1 rounded hover:bg-[#1E2028] text-[#64748B]"
-            >
-              {Icons.close}
-            </button>
+
+            {/* Reindex button — only shown to the course professor */}
+            {course && user && course.professor_id === user.id && (
+              <div className="flex flex-col gap-1">
+                <button
+                  onClick={handleReindex}
+                  disabled={reindexing}
+                  className="w-full py-1.5 rounded-lg text-[0.72rem] font-medium
+                             bg-[#1A1D25] border border-[#1E2028] text-[#94A3B8]
+                             hover:border-[#FF5533]/40 hover:text-[#FF5533]
+                             disabled:opacity-50 disabled:cursor-not-allowed
+                             transition-colors"
+                >
+                  {reindexing ? 'Indexing PDFs…' : '⟳ Reindex Course for AI'}
+                </button>
+                {reindexMsg && (
+                  <p className={`text-[0.68rem] text-center ${reindexMsg.startsWith('✓') ? 'text-green-400' : 'text-amber-400'}`}>
+                    {reindexMsg}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* messages */}
@@ -682,7 +741,7 @@ export default function CourseLearningPage() {
                       [&_strong]:text-white [&_strong]:font-semibold
                       [&_code]:bg-[#0C0C0F] [&_code]:text-[#FF5533] [&_code]:px-1 [&_code]:rounded [&_code]:text-[0.75rem]
                       [&>pre]:bg-[#0C0C0F] [&>pre]:rounded [&>pre]:p-2 [&>pre]:mb-2 [&>pre]:overflow-x-auto [&>pre]:text-[0.75rem]">
-                      <Markdown>{msg.content}</Markdown>
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
                     </div>
                   ) : (
                     <p className="text-[0.82rem] leading-relaxed whitespace-pre-wrap">{msg.content}</p>

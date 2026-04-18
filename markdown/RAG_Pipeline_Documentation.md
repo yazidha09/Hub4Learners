@@ -1,443 +1,582 @@
-# RAG Pipeline Documentation
-
-## Hub4Learners — AI Chat with Retrieval-Augmented Generation
+# RAG Pipeline — Complete Rework Documentation
+## Hub4Learners AI Chat Feature
 
 ---
 
 ## Table of Contents
 
-1. [What is RAG and why use it?](#1-what-is-rag-and-why-use-it)
-2. [Architecture Overview](#2-architecture-overview)
-3. [Technologies & Services](#3-technologies--services)
-4. [Step-by-step Pipeline](#4-step-by-step-pipeline)
-   - 4.1 [Indexing — when a PDF is uploaded](#41-indexing--when-a-pdf-is-uploaded)
-   - 4.2 [Retrieval — when the user sends a message](#42-retrieval--when-the-user-sends-a-message)
-   - 4.3 [Generation — calling Groq with context](#43-generation--calling-groq-with-context)
-5. [Database Schema](#5-database-schema)
-6. [Files Created / Modified](#6-files-created--modified)
-7. [Configuration & Environment Variables](#7-configuration--environment-variables)
-8. [Auto-Indexing Behaviour](#8-auto-indexing-behaviour)
-9. [Chunking Strategy](#9-chunking-strategy)
-10. [Embedding Model](#10-embedding-model)
-11. [Similarity Search (pgvector)](#11-similarity-search-pgvector)
-12. [API Reference](#12-api-reference)
-13. [Full Flow Diagram](#13-full-flow-diagram)
+1. [Overview](#1-overview)
+2. [Why It Was Reworked](#2-why-it-was-reworked)
+3. [Architecture](#3-architecture)
+4. [Pipeline Step-by-Step](#4-pipeline-step-by-step)
+   - 4.1 [PDF Upload & Indexing (On Upload)](#41-pdf-upload--indexing-on-upload)
+   - 4.2 [Lazy Indexing (First Chat)](#42-lazy-indexing-first-chat)
+   - 4.3 [Force Reindex](#43-force-reindex)
+   - 4.4 [Chat & Retrieval](#44-chat--retrieval)
+5. [Files & Their Roles](#5-files--their-roles)
+6. [Database — material_chunks Table](#6-database--material_chunks-table)
+7. [Backend Implementation Detail](#7-backend-implementation-detail)
+   - 7.1 [pdf_text_extractor.py](#71-pdf_text_extractorpy)
+   - 7.2 [chunker.py](#72-chunkerpy)
+   - 7.3 [embeddings.py](#73-embeddingspy)
+   - 7.4 [course_controller.py — upload_material()](#74-course_controllerpy--upload_material)
+   - 7.5 [ai_routes.py — _index_all_materials()](#75-ai_routespy--_index_all_materials)
+   - 7.6 [ai_routes.py — /chat endpoint](#76-ai_routespy--chat-endpoint)
+   - 7.7 [grok.py — chat()](#77-grokpy--chat)
+8. [API Reference](#8-api-reference)
+9. [Environment Variables](#9-environment-variables)
+10. [Files Modified](#10-files-modified)
+11. [Data Flow Diagrams](#11-data-flow-diagrams)
+12. [Business Rules](#12-business-rules)
 
 ---
 
-## 1. What is RAG and why use it?
+## 1. Overview
 
-**RAG (Retrieval-Augmented Generation)** is a technique that gives an AI model access to a private knowledge base *at query time* rather than training it on that data.
+The RAG (Retrieval-Augmented Generation) pipeline powers the AI chat panel
+inside the course learning page. A student can ask any question about a
+course and receive an answer grounded in the actual course PDF materials —
+the AI does not guess or hallucinate, it answers only from what the professor
+uploaded.
 
-Without RAG the old approach was:
-> Dump the **entire** course content (potentially hundreds of pages) into every single prompt → slow, expensive, hits token limits.
-
-With RAG:
-> **Only the most relevant passages** for the user's specific question are retrieved and sent to the AI → faster, cheaper, more accurate, strictly scoped to this course.
-
----
-
-## 2. Architecture Overview
-
-```
-                        ┌──────────────────────────────────┐
-    PDF upload          │         INDEXING PIPELINE         │
-    ──────────►  chunk  │  chunker.py                       │
-                 text   │  Split content into ~1500-char    │
-                   │    │  overlapping passages             │
-                   ▼    └──────────────────────────────────┘
-             embed each chunk
-             (Together AI → BAAI/bge-base-en-v1.5)
-                   │
-                   ▼
-        ┌─────────────────────┐
-        │   material_chunks   │  pgvector table in Neon DB
-        │   (768-dim vectors) │  course_id | content | embedding
-        └─────────────────────┘
-
-                        ┌──────────────────────────────────┐
-    User question       │        QUERY PIPELINE             │
-    ──────────►  embed  │  embeddings.py                    │
-                question│  Same model → 768-dim vector      │
-                   │    └──────────────────────────────────┘
-                   ▼
-        cosine similarity search  (<=> operator)
-        top 6 most relevant chunks for this course
-                   │
-                   ▼
-        ┌──────────────────────┐
-        │     Groq / Llama     │  grok.py
-        │  system: chunks only │  llama-3.3-70b-versatile
-        │  user: question      │
-        └──────────────────────┘
-                   │
-                   ▼
-            Answer to user
-```
+| Component | Technology |
+|---|---|
+| PDF text extraction | PyMuPDF (`fitz`) |
+| Text chunking | Custom Python chunker (`chunker.py`) |
+| Embedding model | BAAI/bge-base-en-v1.5 via Together AI (768 dimensions) |
+| Vector store | pgvector on Neon PostgreSQL (`material_chunks` table) |
+| Similarity search | pgvector `<=>` cosine distance operator |
+| LLM for answers | Groq — `llama-3.3-70b-versatile` |
+| PDF display (frontend) | `react-pdf` + pdfjs-dist (completely separate from RAG) |
 
 ---
 
-## 3. Technologies & Services
+## 2. Why It Was Reworked
 
-| Component | Technology | Purpose |
-|---|---|---|
-| **Chunking** | `chunker.py` (custom Python) | Split extracted markdown into overlapping passages |
-| **Embedding model** | `BAAI/bge-base-en-v1.5` via Together AI | Convert text → 768-dim dense vectors |
-| **Vector store** | pgvector on Neon PostgreSQL | Store & search embeddings with cosine similarity |
-| **Similarity search** | `<=>` cosine operator (pgvector) | Find the most relevant chunks for a query |
-| **LLM** | Groq → `llama-3.3-70b-versatile` | Generate the final answer from retrieved context |
-| **HTTP client** | `requests` (already installed) | All external API calls, no new packages needed |
+**Before the rework**, the pipeline depended on `CourseMaterial.content_text`:
+- Professors were expected to paste or provide the text content of a PDF
+  when uploading it.
+- The RAG would read `mat.content_text` to chunk and embed.
+- If `content_text` was null (which it almost always was), nothing was
+  indexed and the chat had nothing to retrieve.
 
----
-
-## 4. Step-by-step Pipeline
-
-### 4.1 Indexing — when a PDF is uploaded
-
-Triggered automatically inside `upload_material()` in `course_controller.py` right after the PDF-to-markdown conversion.
-
-```
-Professor uploads PDF
-        │
-        ▼
-pdf_to_markdown()          ← Together AI converts PDF → markdown (existing)
-        │
-        ▼
-content_text saved to DB   ← CourseMaterial row committed
-        │
-        ▼
-embed_and_store_material()  ← NEW: RAG indexing
-    │
-    ├── chunker.chunk_text(content_text)
-    │       Split into ~1500-char overlapping passages
-    │
-    ├── For each chunk:
-    │       embeddings.embed_text(chunk)
-    │           POST https://api.together.xyz/v1/embeddings
-    │           model: BAAI/bge-base-en-v1.5
-    │           → [f1, f2, … f768]
-    │
-    └── INSERT INTO material_chunks
-            (material_id, course_id, section_title,
-             material_title, chunk_index, content, embedding::vector)
-```
-
-**Failure safety:** the entire embedding block is wrapped in `try/except`. If Together AI is down or the key is missing, the upload still succeeds — only the chat will lack indexed content for that material.
+**After the rework**, the pipeline is fully decoupled from how the PDF is
+*displayed*:
+- PDFs are displayed in the browser using **react-pdf** reading the raw file
+  directly from the server — no text extraction needed for display.
+- The RAG extracts text **server-side** using **PyMuPDF**, which reads the
+  embedded text layer of the PDF (no OCR, no AI, just the PDF's own text).
+- `content_text` is never written and never read by the pipeline.
+- The frontend PDF viewer and the backend RAG are completely independent.
 
 ---
 
-### 4.2 Retrieval — when the user sends a message
+## 3. Architecture
 
 ```
-User types: "What is backpropagation?"
-        │
-        ▼
-POST /api/ai/chat
-    { course_id, message, history }
-        │
-        ▼
-course_has_chunks(course_id)
-    ├── True  → proceed
-    └── False → _index_all_materials()   ← auto-index legacy content
-                then proceed
-        │
-        ▼
-retrieve_relevant_chunks(query, course_id, top_k=6)
-    │
-    ├── embed_text("What is backpropagation?")
-    │       → [0.12, -0.03, …]  (768 floats)
-    │
-    └── SELECT content, section_title, material_title,
-               1 - (embedding <=> query_vector::vector) AS similarity
-           FROM material_chunks
-           WHERE course_id = :cid
-           ORDER BY embedding <=> query_vector::vector
-           LIMIT 6
-        → Top 6 most semantically relevant passages
+┌─────────────────────────────────────────────────────────────────┐
+│  PROFESSOR UPLOADS PDF                                          │
+│                                                                 │
+│  POST /courses/{id}/sections/{id}/materials                     │
+│       │                                                         │
+│       ▼                                                         │
+│  course_controller.upload_material()                            │
+│       │                                                         │
+│       ├─► Save file to  uploads/materials/<uuid>.pdf            │
+│       │                                                         │
+│       ├─► PyMuPDF extracts raw text from the file              │
+│       │                                                         │
+│       ├─► chunker.chunk_text()  →  list of 1500-char chunks    │
+│       │                                                         │
+│       └─► embed_and_store_material()                            │
+│               │                                                 │
+│               ├─► Together AI → 768-dim embedding per chunk    │
+│               └─► INSERT INTO material_chunks (pgvector)       │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  STUDENT ASKS A QUESTION                                        │
+│                                                                 │
+│  POST /ai/chat  { course_id, message, history }                 │
+│       │                                                         │
+│       ├─► course_has_chunks()?                                  │
+│       │       └── NO → _index_all_materials()  (lazy fallback) │
+│       │                                                         │
+│       ├─► embed_text(message) → query vector                   │
+│       │                                                         │
+│       ├─► SELECT … FROM material_chunks                         │
+│       │   ORDER BY embedding <=> query_vec  LIMIT 6            │
+│       │                                                         │
+│       ├─► Build context block from top-6 chunks                │
+│       │                                                         │
+│       └─► Groq llama-3.3-70b  →  answer grounded in chunks    │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  STUDENT VIEWS PDF (completely separate)                        │
+│                                                                 │
+│  GET /uploads/materials/<uuid>.pdf                              │
+│       │                                                         │
+│       └─► react-pdf renders it in the browser                  │
+│           (zoom, page nav, scroll-spy — no server involvement) │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**File layout after rework:**
+
+```
+backend/
+├── uploads/
+│   └── materials/           ← PDF files stored here
+│       └── <uuid>.pdf
+├── app/
+│   ├── controller/
+│   │   └── course_controller.py   ← upload_material() now triggers indexing
+│   ├── routes/
+│   │   └── ai_routes.py           ← /chat, /reindex endpoints
+│   └── utils/
+│       ├── pdf_text_extractor.py  ← NEW: PyMuPDF text extraction
+│       ├── chunker.py             ← paragraph-aware overlapping chunker
+│       ├── embeddings.py          ← Together AI + pgvector
+│       └── grok.py                ← Groq LLM call
 ```
 
 ---
 
-### 4.3 Generation — calling Groq with context
+## 4. Pipeline Step-by-Step
+
+### 4.1 PDF Upload & Indexing (On Upload)
+
+This is the **primary indexing path** — triggered every time a professor
+uploads a PDF material.
 
 ```
-retrieved_chunks (6 passages)
-        │
-        ▼
-grok.chat(course_title, retrieved_chunks, history, user_message)
-    │
-    ├── Build system prompt:
-    │     "You are a study assistant for course X.
-    │      Here are the relevant passages:
-    │      [Section > Material]
-    │      <chunk text>
-    │      ---
-    │      [Section > Material]
-    │      <chunk text>
-    │      ...
-    │      Answer ONLY from these passages."
-    │
-    ├── Append conversation history (last 20 turns)
-    ├── Append user message
-    │
-    └── POST https://api.groq.com/openai/v1/chat/completions
-            model: llama-3.3-70b-versatile
-            max_tokens: 2048, temperature: 0.4
-        → reply text
+1. Professor submits multipart form with PDF file
+2. _save_file() writes the PDF to uploads/materials/<uuid>.pdf
+3. CourseMaterial row is inserted in the database (content_text stays null)
+4. upload_material() calls extract_pdf_text(full_path)
+   └── PyMuPDF opens the file and reads every page's text layer
+   └── Returns one big string: "page1 text\n\npage2 text\n\n..."
+5. If extracted text is non-empty:
+   └── embed_and_store_material() is called
+       ├── DELETE FROM material_chunks WHERE material_id = <id>
+       ├── chunk_text() splits text into 1500-char overlapping chunks
+       └── For each chunk:
+           ├── embed_text() → Together AI API → 768-float vector
+           └── INSERT INTO material_chunks (id, material_id, course_id,
+               section_title, material_title, chunk_index, content, embedding)
+6. Failures are caught silently — a bad PDF never breaks the upload response
+```
+
+### 4.2 Lazy Indexing (First Chat)
+
+This is the **fallback path** for materials that were uploaded *before* the
+RAG pipeline existed (or for courses with no chunks yet for any reason).
+
+```
+1. Student sends first message for a course
+2. course_has_chunks(course_id) returns False
+3. _index_all_materials(course_id) runs:
+   ├── Queries all sections for the course
+   ├── For each section, queries all materials
+   ├── Skips non-PDF materials (video, audio, exercise)
+   ├── Builds file path: uploads/materials/<basename of mat.file_url>
+   ├── Checks file exists on disk
+   └── Calls extract_pdf_text() + embed_and_store_material() for each PDF
+4. After indexing, retrieval proceeds normally
+```
+
+### 4.3 Force Reindex
+
+Professors (or admins) can force a full re-embedding of a course's materials:
+
+```
+POST /ai/reindex/{course_id}
+└── Calls _index_all_materials() unconditionally
+    (embed_and_store_material deletes old chunks before inserting new ones)
+```
+
+Use this after uploading updated versions of PDFs.
+
+### 4.4 Chat & Retrieval
+
+```
+1. Student sends: { course_id, message, history: [{role, content}, ...] }
+2. embed_text(message) → 768-float query vector via Together AI
+3. pgvector query:
+   SELECT content, section_title, material_title,
+          1 - (embedding <=> query_vec) AS similarity
+   FROM material_chunks
+   WHERE course_id = <id>
+   ORDER BY embedding <=> query_vec
+   LIMIT 6
+4. Top 6 chunks are assembled into a context block:
+   [Section Name › Material Title]
+   <chunk content>
+   ---
+   [Section Name › Material Title]
+   <chunk content>
+   ...
+5. Groq llama-3.3-70b receives:
+   - system prompt with course title + retrieved context
+   - conversation history (last 20 turns)
+   - the user's new question
+6. LLM returns a markdown-formatted answer citing only the retrieved content
+7. Response: { reply: "..." }
 ```
 
 ---
 
-## 5. Database Schema
+## 5. Files & Their Roles
 
-### `material_chunks` table
+| File | Role |
+|---|---|
+| `utils/pdf_text_extractor.py` | **NEW** — PyMuPDF text extraction from a file path |
+| `utils/chunker.py` | Splits raw text into 1500-char overlapping chunks |
+| `utils/embeddings.py` | Together AI calls, pgvector insert/query |
+| `utils/grok.py` | Groq LLM call with system prompt + retrieved context |
+| `controller/course_controller.py` | On PDF upload: extract → chunk → embed |
+| `routes/ai_routes.py` | `/chat` and `/reindex` endpoints |
+
+---
+
+## 6. Database — material_chunks Table
 
 ```sql
 CREATE TABLE material_chunks (
-    id              UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
-    material_id     UUID    NOT NULL REFERENCES course_materials(id) ON DELETE CASCADE,
-    course_id       UUID    NOT NULL REFERENCES courses(id)          ON DELETE CASCADE,
-    section_title   VARCHAR(500),
-    material_title  VARCHAR(500),
-    chunk_index     INTEGER NOT NULL DEFAULT 0,
-    content         TEXT    NOT NULL,
-    embedding       vector(768)         -- pgvector type, cosine similarity
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    material_id    UUID REFERENCES course_materials(id),
+    course_id      UUID REFERENCES courses(id),
+    section_title  TEXT NOT NULL,
+    material_title TEXT NOT NULL,
+    chunk_index    INTEGER NOT NULL,
+    content        TEXT NOT NULL,
+    embedding      vector(768)        -- pgvector column
 );
-
-CREATE INDEX material_chunks_course_idx ON material_chunks (course_id);
 ```
 
-- `ON DELETE CASCADE` — when a material or course is deleted, its chunks are automatically removed.
-- `embedding vector(768)` — 768-dimensional float vector stored natively by pgvector.
-- The course index makes filtering by `course_id` fast before the vector scan.
+**Key points:**
+- One row per chunk. A 30-page PDF typically produces 20–60 chunks.
+- `embedding vector(768)` stores the BAAI/bge-base-en-v1.5 output.
+- The `<=>` operator on `embedding` computes cosine distance (lower = more similar).
+- `1 - (embedding <=> query_vec)` converts to cosine *similarity* (higher = more relevant).
+- When a material is re-uploaded or re-indexed, all its old chunks are deleted first (`DELETE WHERE material_id = ...`) so there are no duplicates.
+- When a course is deleted, `material_chunks` rows are removed first in `delete_course()` using raw SQL.
 
 ---
 
-## 6. Files Created / Modified
+## 7. Backend Implementation Detail
 
-| File | Action | Purpose |
-|---|---|---|
-| `backend/app/utils/chunker.py` | **Created** | Smart paragraph-aware text splitter with overlap |
-| `backend/app/utils/embeddings.py` | **Created** | Together AI embedding calls + pgvector store/retrieve |
-| `backend/app/utils/grok.py` | **Modified** | `chat()` now takes `retrieved_chunks` instead of raw sections |
-| `backend/app/routes/ai_routes.py` | **Modified** | Auto-index + RAG retrieval before calling Groq; added `/reindex` endpoint |
-| `backend/app/controller/course_controller.py` | **Modified** | Triggers `embed_and_store_material()` after PDF upload |
-| `backend/app/main.py` | **Modified** | Added `CREATE EXTENSION IF NOT EXISTS vector` + `material_chunks` table migration |
+### 7.1 `pdf_text_extractor.py`
 
----
+**Location:** `backend/app/utils/pdf_text_extractor.py`
 
-## 7. Configuration & Environment Variables
+```python
+import fitz  # PyMuPDF
 
-| Variable | Service | Used in |
-|---|---|---|
-| `TOGETHER_API_KEY` | Together AI | Embedding calls (`embeddings.py`) and PDF-to-markdown (`pdf_converter.py`) |
-| `GROK_API_KEY` | Groq | LLM generation (`grok.py`) |
-
-Both are read from `backend/.env` via `python-dotenv`.
-
----
-
-## 8. Auto-Indexing Behaviour
-
-Materials uploaded **before** RAG was set up have no chunks in the DB. When a user sends their **first chat message** in such a course, `ai_routes.py` detects the missing chunks and transparently calls `_index_all_materials()` to embed everything on the fly.
-
-```
-First chat in course X
-    │
-    course_has_chunks("X") → False
-    │
-    _index_all_materials("X")   ← one-time, may take a few seconds
-    │
-    course_has_chunks("X") → True (for all future messages)
-    │
-    retrieve_relevant_chunks(...)
-    │
-    reply
+def extract_pdf_text(file_path: str) -> str:
+    doc = fitz.open(file_path)
+    pages = []
+    for page in doc:
+        text = page.get_text("text").strip()
+        if text:
+            pages.append(text)
+    doc.close()
+    return "\n\n".join(pages)
 ```
 
-After that one-time indexing, all subsequent messages use the fast vector search path.
+- Uses `page.get_text("text")` — extracts the embedded text layer only.
+- No OCR, no image processing — purely structural text from the PDF spec.
+- Scanned PDFs (image-only) will return an empty string; they are silently skipped.
+- Pages are joined with `\n\n` so the chunker treats page breaks as paragraph breaks.
 
-A professor can also manually force a re-index at any time via:
-```
-POST /api/ai/reindex/{course_id}
-Authorization: Bearer <token>
-```
+### 7.2 `chunker.py`
 
----
+**Location:** `backend/app/utils/chunker.py`
 
-## 9. Chunking Strategy
+Splits text into overlapping chunks:
+- **Target size:** 1500 characters per chunk
+- **Overlap:** 200 characters carried from the end of the previous chunk
+- **Strategy:** respects paragraph boundaries (`\n\n` splits), then hard-splits oversized paragraphs
+- **Why overlap?** A question about a concept that spans a paragraph boundary will still find a chunk containing both sides.
 
-**File:** `backend/app/utils/chunker.py`
+### 7.3 `embeddings.py`
 
-| Parameter | Value | Reason |
-|---|---|---|
-| Chunk size | 1 500 characters | ~375 tokens — fits comfortably in an embedding model's window |
-| Overlap | 200 characters | Prevents losing context at chunk boundaries |
-| Split boundary | Blank lines (paragraphs/headings) | Keeps semantically related sentences together |
-| Hard-split fallback | If a single paragraph > 2 250 chars | Prevents runaway chunks from huge code blocks |
+**Location:** `backend/app/utils/embeddings.py`
 
-**Example:**
-
-```
-Original text (4 000 chars):
-  Paragraph A (500 chars)
-  Paragraph B (600 chars)
-  Paragraph C (700 chars)
-  Paragraph D (800 chars)
-  Paragraph E (500 chars)
-  Paragraph F (900 chars)
-
-Chunks produced:
-  Chunk 1: A + B + C  (1 800 chars → fits ≤ 1 500 × 1.5)
-  Chunk 2: [tail of C, 200 chars] + D + E  (overlap carries context)
-  Chunk 3: [tail of E, 200 chars] + F
-```
-
----
-
-## 10. Embedding Model
-
-**Model:** `BAAI/bge-base-en-v1.5` via Together AI
-
-| Property | Value |
+| Function | What it does |
 |---|---|
-| Dimensions | 768 |
-| Max input tokens | 512 |
-| Language | English (primary) |
-| Similarity metric | Cosine |
-| API | `POST https://api.together.xyz/v1/embeddings` |
+| `embed_text(text)` | POST to Together AI, returns list of 768 floats |
+| `embed_and_store_material(...)` | Deletes old chunks, chunks text, embeds each chunk, inserts into pgvector |
+| `course_has_chunks(course_id, db)` | Returns True if at least 1 chunk exists for the course |
+| `retrieve_relevant_chunks(query, course_id, db, top_k)` | Embeds query, runs cosine similarity search, returns top_k dicts |
 
-The same model is used for both **indexing** (chunk embeddings) and **querying** (question embedding). This is required — you must use the same model at both stages or similarity scores are meaningless.
+The embedding model is `BAAI/bge-base-en-v1.5` from HuggingFace, hosted by
+Together AI. It produces 768-dimensional vectors optimised for semantic
+similarity in retrieval tasks.
+
+### 7.4 `course_controller.py` — `upload_material()`
+
+**What changed:** After saving the file and committing the `CourseMaterial`
+row, if the material type is `"pdf"`, the controller now:
+
+1. Builds the absolute path to the saved file using `MATERIALS_DIR` + `filename`
+2. Calls `extract_pdf_text(full_path)` to get raw text
+3. If text is non-empty, calls `embed_and_store_material()`
+4. Wraps everything in `try/except` — embedding failure never blocks the upload
+
+```python
+if mat_type == "pdf":
+    full_path = os.path.join(MATERIALS_DIR, filename)
+    try:
+        pdf_text = extract_pdf_text(full_path)
+        if pdf_text.strip():
+            embed_and_store_material(
+                material_id=str(material.id),
+                course_id=course_id,
+                section_title=section.title,
+                material_title=title,
+                content_text=pdf_text,
+                db=db,
+            )
+    except Exception:
+        pass
+```
+
+### 7.5 `ai_routes.py` — `_index_all_materials()`
+
+**What changed:** Completely rewritten. Before:
+
+```python
+# OLD — broken: content_text is always null
+for mat in materials:
+    if mat.content_text:          # ← this was never True
+        embed_and_store_material(...)
+```
+
+After:
+
+```python
+# NEW — reads from disk
+for mat in materials:
+    if mat.type != "pdf":         # skip video, audio, exercise
+        continue
+    file_path = os.path.join(_MATERIALS_DIR, os.path.basename(mat.file_url))
+    if not os.path.isfile(file_path):  # skip if file was deleted
+        continue
+    pdf_text = extract_pdf_text(file_path)
+    if pdf_text.strip():
+        embed_and_store_material(...)
+```
+
+`_MATERIALS_DIR` is resolved relative to the routes file:
+```python
+_MATERIALS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "uploads", "materials")
+# backend/app/routes/ → ../../ → backend/ → uploads/materials/
+```
+
+### 7.6 `ai_routes.py` — `/chat` endpoint
+
+```
+POST /ai/chat
+Auth: Bearer token (any logged-in user)
+Body: { course_id, message, history: [{role, content}] }
+
+Flow:
+1. Verify course exists
+2. If no chunks → _index_all_materials() (lazy init)
+3. retrieve_relevant_chunks(message, course_id, top_k=6)
+4. grok.chat(course_title, chunks, history, message)
+5. Return { reply: "..." }
+```
+
+### 7.7 `grok.py` — `chat()`
+
+Builds a system prompt that:
+- Identifies the assistant as a study tutor for the specific course
+- Pastes the retrieved chunks as context (`[Section › Material]\n<text>`)
+- Instructs the LLM to answer only from the provided context
+- Enforces markdown formatting in responses
+
+LLM parameters: `temperature=0.4`, `max_tokens=2048`, history limited to
+last 20 turns to stay within context limits.
 
 ---
 
-## 11. Similarity Search (pgvector)
+## 8. API Reference
 
-pgvector's `<=>` operator computes **cosine distance** between two vectors.
-
-```sql
--- cosine distance (lower = more similar)
-embedding <=> query_vector::vector
-
--- cosine similarity (higher = more similar, range 0–1)
-1 - (embedding <=> query_vector::vector)
-```
-
-The query used in `retrieve_relevant_chunks`:
-
-```sql
-SELECT
-    content,
-    section_title,
-    material_title,
-    1 - (embedding <=> :qvec::vector) AS similarity
-FROM material_chunks
-WHERE course_id = :cid
-ORDER BY embedding <=> :qvec::vector   -- ascending distance = most similar first
-LIMIT 6;
-```
-
-This returns the 6 passages whose meaning is closest to the student's question, **scoped strictly to the current course** (`WHERE course_id = :cid`).
-
----
-
-## 12. API Reference
-
-### `POST /api/ai/chat`
+### `POST /ai/chat`
 
 Ask the AI a question about a course.
 
-**Auth:** Any authenticated user (JWT Bearer token)
+**Auth:** Bearer token (student or professor)
 
 **Request body:**
 ```json
 {
   "course_id": "uuid",
-  "message": "What is gradient descent?",
+  "message": "What is a probability distribution?",
   "history": [
-    { "role": "user",      "content": "Hello" },
-    { "role": "assistant", "content": "Hi! How can I help?" }
+    { "role": "user", "content": "..." },
+    { "role": "assistant", "content": "..." }
   ]
 }
 ```
 
-**Response:**
+**Success 200:**
 ```json
-{
-  "reply": "**Gradient descent** is an optimisation algorithm used to..."
-}
+{ "reply": "A probability distribution is..." }
+```
+
+**Error responses:**
+
+| Status | Detail |
+|---|---|
+| 401 | Not authenticated |
+| 404 | Course not found |
+
+---
+
+### `POST /ai/reindex/{course_id}`
+
+Force re-embedding of all PDF materials in a course.
+
+**Auth:** Bearer token (any authenticated user)
+
+**Success 200:**
+```json
+{ "detail": "Reindexing complete for course 'Statistics 101'" }
+```
+
+**Error responses:**
+
+| Status | Detail |
+|---|---|
+| 401 | Not authenticated |
+| 404 | Course not found |
+
+---
+
+## 9. Environment Variables
+
+| Variable | Purpose |
+|---|---|
+| `TOGETHER_API_KEY` | Together AI — used by `embed_text()` for BAAI/bge-base-en-v1.5 embeddings |
+| `GROK_API_KEY` | Groq API — used by `grok.chat()` for llama-3.3-70b-versatile |
+
+Both must be set in `backend/.env`. If `TOGETHER_API_KEY` is missing, embedding returns `None` and chunks are not stored. If `GROK_API_KEY` is missing, chat returns a configuration error message.
+
+---
+
+## 10. Files Modified
+
+| File | Action | Purpose |
+|---|---|---|
+| `backend/app/utils/pdf_text_extractor.py` | Created | PyMuPDF text extraction from a PDF file path |
+| `backend/app/controller/course_controller.py` | Modified | Added PDF extraction + embedding call after file save in `upload_material()` |
+| `backend/app/routes/ai_routes.py` | Modified | Rewrote `_index_all_materials()` to read from disk; added `os` import, `_MATERIALS_DIR` constant, `extract_pdf_text` import |
+
+---
+
+## 11. Data Flow Diagrams
+
+### Upload Flow
+
+```
+Professor
+   │
+   │  POST /courses/{id}/sections/{id}/materials
+   │  Content-Type: multipart/form-data
+   │  fields: title, type="pdf", order_index, file=<pdf>
+   │
+   ▼
+course_controller.upload_material()
+   │
+   ├─► _save_file()
+   │       └── writes to uploads/materials/sectionid_pdf_<uuid>.pdf
+   │
+   ├─► CourseMaterial INSERT (content_text=null)
+   │
+   └─► [PDF only]
+           │
+           ▼
+       extract_pdf_text(file_path)
+           │
+           ▼
+       "Chapter 1: Introduction\n\nStatistics is the science of..."
+           │
+           ▼
+       embed_and_store_material()
+           │
+           ├─► DELETE material_chunks WHERE material_id = <id>
+           │
+           ├─► chunk_text() → ["Chapter 1: Intro...", "...the mean is", ...]
+           │
+           └─► for each chunk:
+                   ├── Together AI /v1/embeddings → [0.012, -0.34, ...(768)]
+                   └── INSERT INTO material_chunks
+```
+
+### Chat Flow
+
+```
+Student
+   │
+   │  POST /ai/chat
+   │  { course_id, message: "what is the mean?", history: [...] }
+   │
+   ▼
+ai_routes.ai_chat()
+   │
+   ├─► course_has_chunks(course_id)?
+   │       └── NO → _index_all_materials()  [lazy path]
+   │                    └── reads PDFs from disk → embed → store
+   │
+   ├─► embed_text("what is the mean?")
+   │       └── Together AI → [0.021, -0.18, ...(768)]
+   │
+   ├─► SELECT content, section_title, material_title,
+   │          1-(embedding <=> query_vec) AS similarity
+   │   FROM material_chunks WHERE course_id = ?
+   │   ORDER BY embedding <=> query_vec LIMIT 6
+   │
+   │   Result:
+   │   ┌──────────────────────────────────────────────────────┐
+   │   │ sim=0.91 [Ch1 › Lecture 1] "The mean is the sum..."  │
+   │   │ sim=0.87 [Ch2 › Lecture 3] "...computed as Σx/n..."  │
+   │   │ sim=0.83 [Ch1 › Lecture 1] "...also called average"  │
+   │   └──────────────────────────────────────────────────────┘
+   │
+   ├─► Build context:
+   │   [Ch1 › Lecture 1]
+   │   The mean is the sum of all values...
+   │   ---
+   │   [Ch2 › Lecture 3]
+   │   ...computed as Σx/n...
+   │
+   └─► Groq llama-3.3-70b
+           system: "You are a tutor for 'Statistics 101'.
+                    Answer ONLY from these passages: <context>"
+           user:   "what is the mean?"
+           reply:  "The **mean** (also called the average) is computed
+                    as the sum of all values divided by n: **Σx/n**..."
 ```
 
 ---
 
-### `POST /api/ai/reindex/{course_id}`
+## 12. Business Rules
 
-Force re-embedding of all materials in a course.
-
-**Auth:** Any authenticated user (JWT Bearer token)
-
-**Response:**
-```json
-{
-  "detail": "Reindexing complete for course 'Introduction to Machine Learning'"
-}
-```
-
----
-
-## 13. Full Flow Diagram
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        INDEXING  (upload time)                      │
-│                                                                     │
-│  Professor                                                          │
-│     │ uploads PDF                                                   │
-│     ▼                                                               │
-│  course_controller.upload_material()                                │
-│     │                                                               │
-│     ├─► pdf_to_markdown()  ──► content_text (markdown)             │
-│     │                                                               │
-│     └─► embed_and_store_material()                                  │
-│              │                                                      │
-│              ├─► chunker.chunk_text()                               │
-│              │       ["chunk1", "chunk2", …]                        │
-│              │                                                      │
-│              └─► for each chunk:                                    │
-│                      embeddings.embed_text(chunk)                   │
-│                          Together AI → [f1…f768]                    │
-│                      INSERT INTO material_chunks                    │
-│                          (content, embedding, course_id, …)         │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────┐
-│                        QUERYING  (chat time)                        │
-│                                                                     │
-│  Student / Professor                                                │
-│     │ asks "What is backpropagation?"                               │
-│     ▼                                                               │
-│  POST /api/ai/chat  { course_id, message, history }                │
-│     │                                                               │
-│     ├─► course_has_chunks?                                          │
-│     │       No  → _index_all_materials()  (first-time, one-off)    │
-│     │       Yes → continue                                          │
-│     │                                                               │
-│     ├─► retrieve_relevant_chunks(message, course_id, top_k=6)      │
-│     │       embed_text(message) → query_vector                      │
-│     │       SELECT … ORDER BY embedding <=> query_vector LIMIT 6   │
-│     │       → [{content, section, material, similarity}, …]        │
-│     │                                                               │
-│     ├─► grok.chat(course_title, chunks, history, message)          │
-│     │       Build system prompt with retrieved passages             │
-│     │       POST https://api.groq.com/…/chat/completions           │
-│     │       model: llama-3.3-70b-versatile                         │
-│     │       → reply text (markdown)                                 │
-│     │                                                               │
-│     └─► { "reply": "…" }  → frontend renders as markdown           │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-```
+| Rule | Where enforced |
+|---|---|
+| Only PDF materials are indexed for RAG | `upload_material()` (`if mat_type == "pdf"`), `_index_all_materials()` (`if mat.type != "pdf": continue`) |
+| Embedding failure never blocks PDF upload | `try/except pass` around the whole extraction + embedding block |
+| Old chunks are replaced on re-index | `embed_and_store_material()` deletes by `material_id` before inserting |
+| Missing files are silently skipped during lazy indexing | `if not os.path.isfile(file_path): continue` |
+| Scanned PDFs with no text layer are skipped | `if pdf_text.strip():` check before embedding |
+| `content_text` column is never written or read by the RAG | Extraction goes directly from file → chunks → pgvector |
+| Chat retrieves only chunks from the student's course | `WHERE course_id = :cid` in the pgvector query |
+| LLM answers only from retrieved context | System prompt instructs: "Answer ONLY based on the retrieved passages" |
+| Conversation history is capped at 20 turns | `trimmed = history[-MAX_HISTORY:]` in `grok.py` |
 
 ---
 

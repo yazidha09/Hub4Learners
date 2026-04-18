@@ -1,4 +1,3 @@
-import json
 import os
 import shutil
 from typing import List, Optional
@@ -17,8 +16,6 @@ from app.schemas.course import (
     CourseOut, SectionOut, SectionCreate, MaterialOut, EnrollmentOut,
     StudentOut, CourseStudentsOut,
 )
-from app.utils.embeddings import embed_and_store_material
-from app.utils.pdf_extractor import extract_pdf_content, structured_to_plain_text
 
 THUMBNAILS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "uploads", "thumbnails")
 MATERIALS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "uploads", "materials")
@@ -199,18 +196,6 @@ def upload_material(
     if not section or str(section.course_id) != course_id:
         raise HTTPException(status_code=404, detail="Section not found")
 
-    # ── PDF: extract structured content + plain text for RAG ─────────────────
-    rag_text: Optional[str] = content_text   # fallback if extraction fails
-    if mat_type == "pdf":
-        try:
-            pdf_bytes = file.file.read()
-            file.file.seek(0)
-            structured = extract_pdf_content(pdf_bytes, material_id=section_id)
-            content_text = json.dumps(structured, ensure_ascii=False)
-            rag_text = structured_to_plain_text(structured)
-        except Exception:
-            pass  # extraction failure must never block the upload
-
     filename = _save_file(file, MATERIALS_DIR, MATERIAL_EXTS[mat_type], f"{section_id}_{mat_type}")
     file_url = f"materials/{filename}"
 
@@ -225,22 +210,6 @@ def upload_material(
     db.add(material)
     db.commit()
     db.refresh(material)
-
-    # ── RAG: embed and store chunks ───────────────────────────────────────────
-    if rag_text and mat_type == "pdf":
-        section_row = db.query(CourseSection).filter(CourseSection.id == UUID(section_id)).first()
-        section_title = section_row.title if section_row else ""
-        try:
-            embed_and_store_material(
-                material_id=str(material.id),
-                course_id=str(course.id),
-                section_title=section_title,
-                material_title=title,
-                content_text=rag_text,
-                db=db,
-            )
-        except Exception:
-            pass  # embedding failure must never break the upload response
 
     return MaterialOut(
         id=material.id,
@@ -260,6 +229,21 @@ def delete_course(professor_id: str, course_id: str, db: Session) -> dict:
         raise HTTPException(status_code=404, detail="Course not found")
     if str(course.professor_id) != professor_id:
         raise HTTPException(status_code=403, detail="Not your course")
+
+    cid = str(course.id)
+
+    # 1. course_materials (FK → course_sections, no CASCADE on the ORM model)
+    sections = db.query(CourseSection).filter(CourseSection.course_id == UUID(cid)).all()
+    for section in sections:
+        db.query(CourseMaterial).filter(CourseMaterial.section_id == section.id).delete()
+
+    # 3. course_sections (FK → courses, no CASCADE on the ORM model)
+    db.query(CourseSection).filter(CourseSection.course_id == UUID(cid)).delete()
+
+    # 4. enrollments (FK → courses, no CASCADE on the ORM model)
+    db.query(Enrollment).filter(Enrollment.course_id == UUID(cid)).delete()
+
+    # 5. finally the course itself
     db.delete(course)
     db.commit()
     return {"detail": "Course deleted successfully"}

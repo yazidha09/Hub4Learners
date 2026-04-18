@@ -52,22 +52,6 @@ def on_startup():
 
     with engine.connect() as conn:
         migrations = [
-            # ── pgvector extension (must be first) ───────────────────────────
-            "CREATE EXTENSION IF NOT EXISTS vector",
-            # ── RAG: material chunks table ───────────────────────────────────
-            """
-            CREATE TABLE IF NOT EXISTS material_chunks (
-                id              UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
-                material_id     UUID    NOT NULL REFERENCES course_materials(id) ON DELETE CASCADE,
-                course_id       UUID    NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
-                section_title   VARCHAR(500),
-                material_title  VARCHAR(500),
-                chunk_index     INTEGER NOT NULL DEFAULT 0,
-                content         TEXT    NOT NULL,
-                embedding       vector(768)
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS material_chunks_course_idx ON material_chunks (course_id)",
             # ── Legacy columns (pre-hierarchy) ──────────────────────────────
             "ALTER TABLE courses ADD COLUMN IF NOT EXISTS category_id UUID REFERENCES categories(id) ON DELETE SET NULL",
             "ALTER TABLE courses ADD COLUMN IF NOT EXISTS price NUMERIC(10,2) NOT NULL DEFAULT 0.00",
