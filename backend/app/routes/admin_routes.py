@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.controller import admin_controller
+from app.controller import admin_controller, notification_controller
 from app.database import get_db
 from app.schemas.course import CourseOut
 from app.utils.security import require_min_rank, require_role
@@ -39,13 +39,30 @@ def list_users(
 
 
 @router.put("/users/{user_id}/role")
-def change_role(
+async def change_role(
     user_id: str,
     body: ChangeRoleRequest,
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_min_rank("university_admin")),
 ):
-    return admin_controller.change_user_role(current_user, user_id, body.role, db)
+    result = admin_controller.change_user_role(current_user, user_id, body.role, db)
+    role_labels = {
+        "student": "Student",
+        "professor": "Professor",
+        "university_admin": "University Admin",
+        "regional_admin": "Regional Admin",
+        "super_admin": "Super Admin",
+    }
+    label = role_labels.get(body.role, body.role)
+    await notification_controller.push(
+        user_id=user_id,
+        type="role_changed",
+        title="Role Updated",
+        body=f"Your account role has been updated to {label}",
+        db=db,
+        meta={"new_role": body.role},
+    )
+    return result
 
 
 @router.delete("/users/{user_id}")

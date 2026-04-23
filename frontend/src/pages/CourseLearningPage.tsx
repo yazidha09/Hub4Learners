@@ -1,16 +1,8 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Document, Page, pdfjs } from 'react-pdf'
-import 'react-pdf/dist/Page/AnnotationLayer.css'
-import 'react-pdf/dist/Page/TextLayer.css'
 import ReactMarkdown from 'react-markdown'
 import { useAuth } from '../context/AuthContext'
 import { getCourseDetail, type CourseOut, type MaterialOut, type SectionOut } from '../api/course'
-
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString()
 
 /* ───────── chat message type (prepared for AI) ───────── */
 interface ChatMessage {
@@ -31,6 +23,11 @@ const Icons = {
     <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9l-5-5H7a2 2 0 00-2 2v13a2 2 0 002 2z" />
       <polyline strokeLinecap="round" strokeLinejoin="round" points="14 2 14 8 20 8" />
+    </svg>
+  ),
+  lesson: (
+    <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
     </svg>
   ),
   video: (
@@ -69,147 +66,111 @@ const Icons = {
 const BACKEND = 'http://localhost:8000'
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   PDF Viewer component
+   Rich content viewer — used for both PDF-extracted text and lesson HTML
    ───────────────────────────────────────────────────────────────────────────── */
-function PdfViewer({ url }: { url: string }) {
-  const [numPages, setNumPages]       = useState(0)
-  const [scale, setScale]             = useState(1.3)
-  const [currentPage, setCurrentPage] = useState(1)
-  const [docLoading, setDocLoading]   = useState(true)
-  const scrollRef  = useRef<HTMLDivElement>(null)
-  const pageRefs   = useRef<Map<number, Element>>(new Map())
-  const observerRef = useRef<IntersectionObserver | null>(null)
+function ContentViewer({ html }: { html: string }) {
+  return (
+    <div className="h-full overflow-y-auto bg-[#0E1014] scrollbar-thin">
+      <div className="max-w-3xl mx-auto px-8 py-10">
+        <div
+          className="
+            prose prose-invert max-w-none text-[#CBD5E1] leading-[1.85]
 
-  /* zoom helpers */
-  const zoomIn  = () => setScale(s => Math.min(3.0, +(s + 0.2).toFixed(1)))
-  const zoomOut = () => setScale(s => Math.max(0.4, +(s - 0.2).toFixed(1)))
-  const fitWidth = useCallback(() => {
-    if (!scrollRef.current) return
-    const available = scrollRef.current.clientWidth - 48   // subtract padding
-    setScale(+(available / 816).toFixed(2))                // 816px ≈ A4 at 96 dpi
-  }, [])
+            [&>h2]:text-[1.2rem] [&>h2]:font-bold [&>h2]:text-white
+            [&>h2]:mt-10 [&>h2]:mb-4 [&>h2]:pb-2
+            [&>h2]:border-b [&>h2]:border-[#FF5533]/30
 
-  /* reset when URL changes */
+            [&>h3]:text-[1.05rem] [&>h3]:font-semibold [&>h3]:text-[#E2E8F0]
+            [&>h3]:mt-8 [&>h3]:mb-3 [&>h3]:pb-1.5
+            [&>h3]:border-b [&>h3]:border-[#1E2028]
+
+            [&>h4]:text-[0.92rem] [&>h4]:font-semibold [&>h4]:text-[#CBD5E1]
+            [&>h4]:mt-6 [&>h4]:mb-2
+
+            [&>p]:text-[0.9rem] [&>p]:mb-5 [&>p]:text-[#CBD5E1]
+
+            [&>ul]:list-disc [&>ul]:pl-6 [&>ul]:mb-5 [&>ul]:space-y-1.5
+            [&>ol]:list-decimal [&>ol]:pl-6 [&>ol]:mb-5 [&>ol]:space-y-1.5
+            [&_li]:text-[0.88rem] [&_li]:text-[#94A3B8]
+
+            [&>blockquote]:border-l-[3px] [&>blockquote]:border-[#FF5533]/50
+            [&>blockquote]:pl-4 [&>blockquote]:my-5 [&>blockquote]:text-[#64748B] [&>blockquote]:italic
+
+            [&_strong]:text-[#E2E8F0] [&_strong]:font-semibold
+            [&_em]:text-[#94A3B8]
+
+            [&_code]:bg-[#1A1D25] [&_code]:text-[#FF5533]
+            [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.78rem]
+            [&_code]:font-mono [&_code]:border [&_code]:border-[#1E2028]
+
+            [&>pre]:bg-[#111318] [&>pre]:border [&>pre]:border-[#1E2028]
+            [&>pre]:rounded-xl [&>pre]:p-5 [&>pre]:my-5 [&>pre]:overflow-x-auto
+            [&>pre]:text-[0.8rem] [&>pre]:leading-relaxed
+            [&>pre_code]:bg-transparent [&>pre_code]:border-0
+            [&>pre_code]:text-[#94A3B8] [&>pre_code]:p-0
+          "
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      </div>
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Material reader — fetches text for PDFs, shows HTML for lessons
+   ───────────────────────────────────────────────────────────────────────────── */
+function MaterialReader({ material, token }: { material: MaterialOut; token: string | null }) {
+  const [html, setHtml] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
   useEffect(() => {
-    setNumPages(0)
-    setCurrentPage(1)
-    setDocLoading(true)
-    pageRefs.current.clear()
-  }, [url])
+    setHtml(null)
+    setError('')
+    setLoading(true)
 
-  /* scroll-spy: track which page is most visible */
-  useEffect(() => {
-    if (!numPages || !scrollRef.current) return
-    observerRef.current?.disconnect()
-    observerRef.current = new IntersectionObserver(
-      entries => {
-        let best = { ratio: 0, page: currentPage }
-        entries.forEach(e => {
-          const p = parseInt(e.target.getAttribute('data-page') ?? '1')
-          if (e.intersectionRatio > best.ratio) best = { ratio: e.intersectionRatio, page: p }
-        })
-        if (best.ratio > 0) setCurrentPage(best.page)
-      },
-      { root: scrollRef.current, threshold: [0, 0.25, 0.5, 0.75, 1] },
+    if (material.content_text) {
+      setHtml(material.content_text)
+      setLoading(false)
+      return
+    }
+
+    if (material.type === 'pdf') {
+      fetch(`http://localhost:8000/api/courses/materials/${material.id}/text`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+        .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
+        .then(data => setHtml(data.html as string))
+        .catch(() => setError('Could not extract text from this PDF.'))
+        .finally(() => setLoading(false))
+      return
+    }
+
+    setLoading(false)
+  }, [material.id])
+
+  if (loading) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-3">
+        <div className="w-6 h-6 border-2 border-[#FF5533] border-t-transparent rounded-full animate-spin" />
+        <span className="text-[0.8rem] text-[#475569]">Reading content…</span>
+      </div>
     )
-    pageRefs.current.forEach(el => observerRef.current!.observe(el))
-    return () => observerRef.current?.disconnect()
-  }, [numPages, scale])
-
-  const setPageRef = (page: number) => (el: Element | null) => {
-    if (el) pageRefs.current.set(page, el)
-    else    pageRefs.current.delete(page)
   }
 
+  if (error) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <p className="text-[0.82rem] text-red-400">{error}</p>
+      </div>
+    )
+  }
+
+  if (html) return <ContentViewer html={html} />
+
   return (
-    <div className="flex flex-col h-full bg-[#0C0C0F]">
-
-      {/* ── toolbar ── */}
-      <div className="shrink-0 flex items-center justify-between gap-4 px-4 py-2
-                      bg-[#111318] border-b border-[#1E2028]">
-        {/* zoom controls */}
-        <div className="flex items-center gap-1">
-          <button
-            onClick={zoomOut}
-            className="w-7 h-7 rounded-md bg-[#1A1D25] hover:bg-[#222530] text-[#94A3B8]
-                       hover:text-white flex items-center justify-center text-lg leading-none
-                       transition-colors duration-150 font-light select-none"
-            title="Zoom out"
-          >−</button>
-
-          <span className="w-14 text-center text-[0.75rem] font-mono text-[#94A3B8] tabular-nums select-none">
-            {Math.round(scale * 100)}%
-          </span>
-
-          <button
-            onClick={zoomIn}
-            className="w-7 h-7 rounded-md bg-[#1A1D25] hover:bg-[#222530] text-[#94A3B8]
-                       hover:text-white flex items-center justify-center text-lg leading-none
-                       transition-colors duration-150 font-light select-none"
-            title="Zoom in"
-          >+</button>
-
-          <button
-            onClick={fitWidth}
-            className="ml-1 px-2.5 h-7 rounded-md bg-[#1A1D25] hover:bg-[#222530]
-                       text-[0.7rem] text-[#64748B] hover:text-[#94A3B8]
-                       transition-colors duration-150 select-none"
-            title="Fit to width"
-          >
-            Fit
-          </button>
-        </div>
-
-        {/* page counter */}
-        {numPages > 0 && (
-          <span className="text-[0.72rem] text-[#475569] font-mono tabular-nums select-none">
-            {currentPage} <span className="text-[#2D3748]">/</span> {numPages}
-          </span>
-        )}
-      </div>
-
-      {/* ── scrollable pages ── */}
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto overflow-x-auto bg-[#181B22] scrollbar-thin"
-      >
-        {/* loading state */}
-        {docLoading && (
-          <div className="flex items-center justify-center h-full min-h-[300px] gap-3">
-            <div className="w-5 h-5 border-2 border-[#FF5533] border-t-transparent rounded-full animate-spin" />
-            <span className="text-[0.8rem] text-[#475569]">Loading PDF…</span>
-          </div>
-        )}
-
-        <Document
-          file={url}
-          onLoadSuccess={({ numPages: n }) => { setNumPages(n); setDocLoading(false) }}
-          onLoadError={() => setDocLoading(false)}
-          loading={null}
-          className={docLoading ? 'hidden' : undefined}
-        >
-          <div className="flex flex-col items-center py-6 gap-3 px-6">
-            {Array.from({ length: numPages }, (_, i) => {
-              const pageNum = i + 1
-              return (
-                <div
-                  key={pageNum}
-                  data-page={pageNum}
-                  ref={setPageRef(pageNum)}
-                  className="shadow-[0_4px_24px_rgba(0,0,0,0.5)] rounded-sm overflow-hidden"
-                >
-                  <Page
-                    pageNumber={pageNum}
-                    scale={scale}
-                    renderAnnotationLayer
-                    renderTextLayer
-                  />
-                </div>
-              )
-            })}
-          </div>
-        </Document>
-      </div>
+    <div className="h-full flex flex-col items-center justify-center gap-4">
+      <p className="text-[0.88rem] text-[#94A3B8]">No readable content for this material.</p>
     </div>
   )
 }
@@ -496,7 +457,7 @@ export default function CourseLearningPage() {
                         <span
                           className={`flex-shrink-0 ${isActive ? 'text-[#FF5533]' : 'text-[#64748B]'}`}
                         >
-                          {mat.type === 'video' ? Icons.video : Icons.pdf}
+                          {mat.type === 'video' ? Icons.video : mat.type === 'pdf' ? Icons.pdf : Icons.lesson}
                         </span>
                         <span className="text-[0.78rem] leading-tight truncate">{mat.title}</span>
                         <span
@@ -535,7 +496,7 @@ export default function CourseLearningPage() {
               <div className="px-5 py-3 border-b border-[#1E2028] bg-[#111318]/60">
                 <div className="flex items-center gap-2">
                   <span className="text-[#FF5533]">
-                    {activeMaterial.type === 'video' ? Icons.video : Icons.pdf}
+                    {activeMaterial.type === 'video' ? Icons.video : activeMaterial.type === 'pdf' ? Icons.pdf : Icons.lesson}
                   </span>
                   <h3 className="text-[0.88rem] font-medium text-[#E2E8F0]">
                     {activeMaterial.title}
@@ -562,24 +523,12 @@ export default function CourseLearningPage() {
                       Your browser does not support video playback.
                     </video>
                   </div>
-                ) : activeMaterial.type === 'pdf' ? (
-                  <PdfViewer key={activeMaterial.id} url={materialUrl} />
                 ) : (
-                  /* audio, exercise, link fallback */
-                  <div className="h-full flex flex-col items-center justify-center gap-4">
-                    <div className="w-20 h-20 rounded-2xl bg-[#1A1D25] flex items-center justify-center text-[#FF5533]">
-                      {Icons.pdf}
-                    </div>
-                    <p className="text-[0.88rem] text-[#94A3B8]">{activeMaterial.title}</p>
-                    <a
-                      href={materialUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-4 py-2 bg-[#FF5533] text-white text-[0.82rem] rounded-lg hover:bg-[#E64422] transition-colors"
-                    >
-                      Download File
-                    </a>
-                  </div>
+                  <MaterialReader
+                    key={activeMaterial.id}
+                    material={activeMaterial}
+                    token={token}
+                  />
                 )}
               </div>
             </>

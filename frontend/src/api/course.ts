@@ -4,11 +4,33 @@ export interface MaterialOut {
   id: string
   section_id: string
   title: string
-  type: 'pdf' | 'video' | 'audio' | 'exercise'
+  type: 'pdf' | 'video' | 'audio' | 'exercise' | 'lesson'
   file_url: string
   content_text?: string
   order_index: number
   created_at: string
+}
+
+export interface GenerationJob {
+  job_id: string
+  status: 'processing' | 'completed' | 'failed'
+  pdf_filename: string
+  difficulty: string
+  result?: {
+    title: string
+    sections: Array<{
+      title: string
+      subsections: Array<{ title: string; content: string }>
+    }>
+  }
+  error?: string
+}
+
+export interface ImportResult {
+  detail: string
+  course_id: string
+  sections_created: number
+  lessons_created: number
 }
 
 export interface SectionOut {
@@ -140,4 +162,31 @@ export function unenrollFromCourse(token: string, courseId: string): Promise<{ d
 
 export function deleteCourse(token: string, courseId: string): Promise<{ detail: string }> {
   return request<{ detail: string }>(`/courses/${courseId}`, token, { method: 'DELETE' })
+}
+
+// ── AI course generation ──────────────────────────────────────────────────────
+
+export function uploadPdfForGeneration(
+  token: string,
+  file: File,
+  difficulty: string,
+): Promise<{ job_id: string; status: string; message: string }> {
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('difficulty', difficulty)
+  return request('/course-gen/upload', token, { method: 'POST', body: fd })
+}
+
+export function pollGenerationJob(token: string, jobId: string): Promise<GenerationJob> {
+  return request<GenerationJob>(`/course-gen/${jobId}`, token)
+}
+
+export function importGeneratedCourse(
+  token: string,
+  jobId: string,
+  courseId: string,
+): Promise<ImportResult> {
+  return request<ImportResult>(`/course-gen/${jobId}/import/${courseId}`, token, {
+    method: 'POST',
+  })
 }

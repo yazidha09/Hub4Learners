@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { getMessages, sendMessage, closeChatRoom, type MessageOut } from '../api/chat'
 
+const WS_BASE = 'ws://localhost:8000'
+
 interface ChatRoomProps {
   token: string
   requestId: string
@@ -49,8 +51,26 @@ export default function ChatRoom({
 
   useEffect(() => {
     fetchMessages()
-    const interval = setInterval(fetchMessages, 3000)
-    return () => clearInterval(interval)
+
+    const ws = new WebSocket(`${WS_BASE}/ws/chat/${requestId}?token=${encodeURIComponent(token)}`)
+
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data) as MessageOut
+        setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg])
+      } catch { /* ignore malformed frames */ }
+    }
+
+    // Fallback polling if WebSocket is unavailable
+    let fallbackInterval: ReturnType<typeof setInterval> | null = null
+    ws.onerror = () => {
+      fallbackInterval = setInterval(fetchMessages, 3000)
+    }
+
+    return () => {
+      ws.close()
+      if (fallbackInterval) clearInterval(fallbackInterval)
+    }
   }, [requestId])
 
   useEffect(() => {

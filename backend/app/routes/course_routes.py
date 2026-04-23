@@ -1,14 +1,148 @@
+import os
 from typing import List, Optional
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from app.controller import course_controller
+from app.controller import course_controller, notification_controller
 from app.database import get_db
+from app.models.course_material import CourseMaterial
+from app.models.courses import Course
+from app.models.user import User
 from app.schemas.course import CourseOut, CourseStudentsOut, EnrollmentOut, MaterialOut, SectionCreate, SectionOut
 from app.utils.security import get_current_user, require_role
 
 router = APIRouter(prefix="/courses", tags=["courses"])
+
+_UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "uploads")
+
+
+@router.get("/materials/{material_id}/text")
+def get_material_text(
+    material_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(get_current_user),
+):
+    """Extract and return the text content of a PDF material as HTML."""
+    mat = db.query(CourseMaterial).filter(CourseMaterial.id == UUID(material_id)).first()
+    if not mat:
+        raise HTTPException(status_code=404, detail="Material not found")
+    if mat.type != "pdf":
+        raise HTTPException(status_code=400, detail="Only PDF materials support text extraction")
+
+    pdf_path = os.path.join(_UPLOADS_DIR, mat.file_url)
+    if not os.path.isfile(pdf_path):
+        raise HTTPException(status_code=404, detail="PDF file not found on server")
+
+    try:
+        import fitz
+        html = _pdf_to_html(pdf_path)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"PDF extraction failed: {exc}")
+
+    return {"html": html}
+
+
+def _pdf_to_html(path: str) -> str:
+    """Convert a PDF file to clean HTML using PyMuPDF font metadata."""
+    import fitz
+
+    doc = fitz.open(path)
+    all_spans: list[dict] = []
+
+    for page in doc:
+        blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]
+        for block in blocks:
+            if block.get("type") != 0:
+                continue
+            for line in block["lines"]:
+                line_spans = []
+                for span in line["spans"]:
+                    text = span["text"].strip()
+                    if text:
+                        line_spans.append({
+                            "text": text,
+                            "size": span["size"],
+                            "bold": bool(span["flags"] & 16) or "Bold" in span.get("font", ""),
+                        })
+                if line_spans:
+                    all_spans.append({"spans": line_spans, "is_line": True})
+
+    doc.close()
+
+    if not all_spans:
+        return "<p>No readable text found in this PDF.</p>"
+
+    # Compute median font size for heading detection
+    sizes = sorted(s["size"] for line in all_spans for s in line["spans"])
+    median = sizes[len(sizes) // 2] if sizes else 12.0
+
+    html_parts: list[str] = []
+    para_buf: list[str] = []
+
+    def flush_para() -> None:
+        text = " ".join(para_buf).strip()
+        if text:
+            html_parts.append(f"<p>{text}</p>")
+        para_buf.clear()
+
+    _BULLET_PREFIXES = ("•", "-", "–", "●", "*", "·")
+
+    for line in all_spans:
+        spans = line["spans"]
+        line_text = " ".join(s["text"] for s in spans).strip()
+        if not line_text:
+            flush_para()
+            continue
+
+        first = spans[0]
+        is_large = first["size"] >= median * 1.35
+        is_medium = first["size"] >= median * 1.15
+        is_bold = first["bold"]
+
+        # Heading detection
+        if is_large or (is_medium and is_bold):
+            flush_para()
+            tag = "h2" if is_large else "h3"
+            html_parts.append(f"<{tag}>{line_text}</{tag}>")
+            continue
+
+        # Bullet list
+        if any(line_text.startswith(p) for p in _BULLET_PREFIXES):
+            flush_para()
+            item = line_text.lstrip("•-–●*· ").strip()
+            html_parts.append(f"<ul><li>{item}</li></ul>")
+            continue
+
+        # Numbered list (e.g. "1.", "2.")
+        if len(line_text) > 2 and line_text[0].isdigit() and line_text[1] in (".", ")"):
+            flush_para()
+            item = line_text[2:].strip()
+            html_parts.append(f"<ol><li>{item}</li></ol>")
+            continue
+
+        # Bold-only line → treat as subheading
+        if is_bold and first["size"] >= median * 1.02:
+            flush_para()
+            html_parts.append(f"<h4>{line_text}</h4>")
+            continue
+
+        para_buf.append(line_text)
+
+    flush_para()
+
+    # Merge consecutive <ul> and <ol> blocks
+    merged: list[str] = []
+    for part in html_parts:
+        if merged and merged[-1].endswith("</li></ul>") and part.startswith("<ul><li>"):
+            merged[-1] = merged[-1][:-5] + "<li>" + part[8:-5] + "</li></ul>"
+        elif merged and merged[-1].endswith("</li></ol>") and part.startswith("<ol><li>"):
+            merged[-1] = merged[-1][:-5] + "<li>" + part[8:-5] + "</li></ol>"
+        else:
+            merged.append(part)
+
+    return "\n".join(merged)
 
 
 # ── Professor routes ──────────────────────────────────────────────────────────
@@ -125,12 +259,24 @@ def get_course(course_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{course_id}/enroll", response_model=EnrollmentOut)
-def enroll(
+async def enroll(
     course_id: str,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    return course_controller.enroll_student(current_user["sub"], course_id, db)
+    enrollment = course_controller.enroll_student(current_user["sub"], course_id, db)
+    course = db.query(Course).filter(Course.id == UUID(course_id)).first()
+    student = db.query(User).filter(User.id == UUID(current_user["sub"])).first()
+    if course and student:
+        await notification_controller.push(
+            user_id=str(course.professor_id),
+            type="enrollment",
+            title="New Enrollment",
+            body=f"{student.full_name} enrolled in your course \"{course.title}\"",
+            db=db,
+            meta={"course_id": course_id, "student_id": current_user["sub"]},
+        )
+    return enrollment
 
 
 @router.delete("/{course_id}/enroll")

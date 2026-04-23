@@ -10,6 +10,8 @@ import {
 import { listCategories, type CategoryOut } from '../api/category'
 import { sendChatRequest, getMyChatRequests, type ChatRequestOut } from '../api/chat'
 import ChatRoom from '../components/ChatRoom'
+import FriendsMessenger from '../components/FriendsMessenger'
+import FindFriends from '../components/FindFriends'
 import { listUniversities, type UniversityOut } from '../api/org'
 import { updateProfile } from '../api/auth'
 
@@ -39,12 +41,25 @@ const ChatIcon = () => (
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
   </svg>
 )
+const FriendsIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  </svg>
+)
+const AddFriendIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+    <line x1="19" y1="8" x2="19" y2="14" /><line x1="22" y1="11" x2="16" y2="11" />
+  </svg>
+)
 
 const BASE_NAV: NavItem[] = [
   { id: 'home', label: 'Home', icon: <HomeIcon /> },
   { id: 'courses', label: 'Courses', icon: <BookIcon /> },
   { id: 'my-courses', label: 'My Courses', icon: <GraduationCapIcon /> },
   { id: 'chat', label: 'Chat Requests', icon: <ChatIcon /> },
+  { id: 'messages', label: 'Messages', icon: <FriendsIcon /> },
+  { id: 'find-friends', label: 'Find Friends', icon: <AddFriendIcon /> },
   { id: 'grades', label: 'Grades', icon: <ChartIcon /> },
 ]
 
@@ -634,7 +649,7 @@ function BrowseCoursesSection({ token }: { token: string }) {
 }
 
 /* ── My Courses Section (enrolled) ── */
-function MyCoursesSection({ token }: { token: string }) {
+function MyCoursesSection({ token, onNavigate }: { token: string; onNavigate: (id: string) => void }) {
   const navigate = useNavigate()
   const [enrolled, setEnrolled] = useState<CourseOut[]>([])
   const [loading, setLoading] = useState(true)
@@ -827,7 +842,7 @@ function MyCoursesSection({ token }: { token: string }) {
           </div>
           <p className="text-base font-semibold text-slate-900 mb-1">No courses yet</p>
           <p className="text-sm text-slate-500 mb-4">Enroll in a course to get started</p>
-          <button className="px-4 py-2 text-sm font-semibold text-white bg-slate-900 rounded-xl hover:bg-slate-800 transition-colors duration-200">
+          <button onClick={() => onNavigate('courses')} className="px-4 py-2 text-sm font-semibold text-white bg-slate-900 rounded-xl hover:bg-slate-800 transition-colors duration-200">
             Browse courses
           </button>
         </div>
@@ -1013,59 +1028,71 @@ function ChatRequestsSection({ token, currentUserId }: { token: string; currentU
 export default function StudentDashboard() {
   const { user, token } = useAuth()
   const [nav, setNav] = useState('home')
+  // Track which sections have been visited so they mount once and stay alive
+  const [mounted, setMounted] = useState<Set<string>>(() => new Set(['home']))
   const firstName = user?.full_name?.split(' ')[0] || ''
+
+  useEffect(() => {
+    setMounted(prev => {
+      if (prev.has(nav)) return prev
+      const next = new Set(prev)
+      next.add(nav)
+      return next
+    })
+  }, [nav])
 
   const resumeCourse = COURSES.reduce(
     (best, c) => (c.progress > 0 && c.progress < 100 && c.progress > (best?.progress ?? 0) ? c : best),
     null as (typeof COURSES)[0] | null,
   )
 
-  if (nav === 'courses') {
-    return (
-      <DashboardLayout navItems={BASE_NAV} activeNav={nav} onNavChange={setNav} roleLabel="Student">
-        <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
-          <BrowseCoursesSection token={token!} />
-        </div>
-      </DashboardLayout>
-    )
-  }
+  const knownNavIds = new Set(['home', 'courses', 'my-courses', 'chat', 'messages', 'find-friends'])
 
-  if (nav === 'my-courses') {
-    return (
-      <DashboardLayout navItems={BASE_NAV} activeNav={nav} onNavChange={setNav} roleLabel="Student">
-        <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
-          <MyCoursesSection token={token!} />
-        </div>
-      </DashboardLayout>
-    )
-  }
+  return (
+    <DashboardLayout navItems={BASE_NAV} activeNav={nav} onNavChange={setNav} roleLabel="Student">
 
-  if (nav === 'chat') {
-    return (
-      <DashboardLayout navItems={BASE_NAV} activeNav={nav} onNavChange={setNav} roleLabel="Student">
-        <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
-          <ChatRequestsSection token={token!} currentUserId={user!.id} />
-        </div>
-      </DashboardLayout>
-    )
-  }
+      {/* ── Courses ── */}
+      <div className={nav !== 'courses' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
+        {mounted.has('courses') && <BrowseCoursesSection token={token!} />}
+      </div>
 
-  if (nav !== 'home') {
-    return (
-      <DashboardLayout navItems={BASE_NAV} activeNav={nav} onNavChange={setNav} roleLabel="Student">
+      {/* ── My Courses ── */}
+      <div className={nav !== 'my-courses' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
+        {mounted.has('my-courses') && <MyCoursesSection token={token!} onNavigate={setNav} />}
+      </div>
+
+      {/* ── Chat ── */}
+      <div className={nav !== 'chat' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
+        {mounted.has('chat') && <ChatRequestsSection token={token!} currentUserId={user!.id} />}
+      </div>
+
+      {/* ── Messages ── */}
+      <div className={nav !== 'messages' ? 'hidden' : 'max-w-[1100px] mx-auto px-6 md:px-10 py-8'}>
+        {mounted.has('messages') && <FriendsMessenger token={token!} currentUserId={user!.id} />}
+      </div>
+
+      {/* ── Find Friends ── */}
+      <div className={nav !== 'find-friends' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
+        {mounted.has('find-friends') && (
+          <>
+            <h2 className="text-[1.3rem] font-bold text-[#0C0C0F] mb-6">Find Friends</h2>
+            <FindFriends token={token!} />
+          </>
+        )}
+      </div>
+
+      {/* ── Coming-soon sections ── */}
+      {!knownNavIds.has(nav) && (
         <div className="flex-1 flex items-center justify-center min-h-[60vh]">
           <div className="text-center">
             <h2 className="text-[1.1rem] font-bold text-[#0C0C0F]">{BASE_NAV.find(n => n.id === nav)?.label}</h2>
             <p className="text-[0.82rem] text-[#94A3B8] mt-1">Coming soon</p>
           </div>
         </div>
-      </DashboardLayout>
-    )
-  }
+      )}
 
-  return (
-    <DashboardLayout navItems={BASE_NAV} activeNav={nav} onNavChange={setNav} roleLabel="Student">
-      <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
+      {/* ── Home ── */}
+      <div className={nav !== 'home' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
 
         {/* Hero */}
         <div className="mb-10 relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#0F172A] via-[#111827] to-[#0B1021] text-white shadow-[0_25px_80px_rgba(15,23,42,0.35)] border border-white/10">
@@ -1142,7 +1169,7 @@ export default function StudentDashboard() {
               <div className="mt-4 h-[3px] bg-[#F1F3F5] rounded-full overflow-hidden">
                 <div className="h-full rounded-full" style={{ width: `${resumeCourse.progress}%`, background: resumeCourse.color }} />
               </div>
-              <button className="mt-4 px-4 py-2 bg-[#0C0C0F] text-white text-[0.78rem] font-bold rounded-md border-none cursor-pointer hover:bg-[#1E1E23] transition-colors">
+              <button onClick={() => setNav('my-courses')} className="mt-4 px-4 py-2 bg-[#0C0C0F] text-white text-[0.78rem] font-bold rounded-md border-none cursor-pointer hover:bg-[#1E1E23] transition-colors">
                 Resume
               </button>
             </div>

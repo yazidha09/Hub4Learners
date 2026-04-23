@@ -1,14 +1,166 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { updateProfile } from '../api/auth'
 import type { UpdateProfileData } from '../api/auth'
 import Modal from './Modal'
+import { useNotifications, type AppNotification, type NotificationType } from '../hooks/useNotifications'
 
 export interface NavItem {
   id: string
   label: string
   icon: React.ReactNode
+}
+
+const NOTIF_ICONS: Record<NotificationType | string, React.ReactNode> = {
+  friend_request: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+      <line x1="19" y1="8" x2="19" y2="14" /><line x1="22" y1="11" x2="16" y2="11" />
+    </svg>
+  ),
+  friend_request_reviewed: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+      <polyline points="16 11 18 13 22 9" />
+    </svg>
+  ),
+  friend_message: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  ),
+  chat_request: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  ),
+  chat_request_reviewed: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  ),
+  enrollment: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" />
+    </svg>
+  ),
+  role_changed: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+      <polyline points="16 11 18 13 22 9" />
+    </svg>
+  ),
+}
+
+const NOTIF_COLORS: Record<NotificationType | string, string> = {
+  friend_request: 'bg-blue-100 text-blue-600',
+  friend_request_reviewed: 'bg-emerald-100 text-emerald-600',
+  friend_message: 'bg-violet-100 text-violet-600',
+  chat_request: 'bg-amber-100 text-amber-600',
+  chat_request_reviewed: 'bg-sky-100 text-sky-600',
+  enrollment: 'bg-teal-100 text-teal-600',
+  role_changed: 'bg-purple-100 text-purple-600',
+}
+
+function timeAgo(iso: string): string {
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+  if (diff < 60) return 'just now'
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  return `${Math.floor(diff / 86400)}d ago`
+}
+
+function NotificationPanel({
+  notifications,
+  onDismiss,
+  onMarkOneRead,
+  onClearAll,
+  onClose,
+}: {
+  notifications: AppNotification[]
+  onDismiss: (id: string) => void
+  onMarkOneRead: (id: string) => void
+  onClearAll: () => void
+  onClose: () => void
+}) {
+  return (
+    <div
+      className="absolute bottom-10 left-0 z-50 w-[320px] bg-white rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.18)] border border-slate-100 overflow-hidden"
+      style={{ animation: 'fadeInUp 0.18s ease-out' }}
+    >
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+        <span className="text-[0.78rem] font-bold text-[#0C0C0F] tracking-wide">Notifications</span>
+        <div className="flex items-center gap-1">
+          {notifications.length > 0 && (
+            <button
+              onClick={onClearAll}
+              className="text-[0.65rem] text-slate-400 hover:text-red-500 bg-transparent border-none cursor-pointer transition-colors px-1"
+            >
+              Clear all
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="w-6 h-6 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 bg-transparent border-none cursor-pointer transition-colors"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div className="max-h-[360px] overflow-y-auto">
+        {notifications.length === 0 ? (
+          <div className="py-10 text-center">
+            <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center mx-auto mb-3">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-slate-300">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+            </div>
+            <p className="text-[0.75rem] text-slate-400">No notifications yet</p>
+          </div>
+        ) : (
+          <div>
+            {notifications.map(n => (
+              <div
+                key={n.id}
+                onClick={() => { if (!n.read) onMarkOneRead(n.id) }}
+                className={`flex items-start gap-3 px-4 py-3 border-b border-slate-50 transition-colors group cursor-pointer ${!n.read ? 'bg-blue-50/40 hover:bg-blue-50/70' : 'hover:bg-slate-50'}`}
+              >
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${NOTIF_COLORS[n.type] ?? 'bg-slate-100 text-slate-500'}`}>
+                  {NOTIF_ICONS[n.type] ?? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-[0.75rem] font-semibold text-[#0C0C0F] leading-tight">{n.title}</p>
+                    {!n.read && <span className="w-1.5 h-1.5 rounded-full bg-[#FF5533] shrink-0" />}
+                  </div>
+                  <p className="text-[0.72rem] text-slate-500 mt-0.5 leading-snug">{n.body}</p>
+                  <p className="text-[0.65rem] text-slate-300 mt-1">{timeAgo(n.timestamp)}</p>
+                </div>
+                <button
+                  onClick={e => { e.stopPropagation(); onDismiss(n.id) }}
+                  className="w-5 h-5 flex items-center justify-center rounded text-slate-300 hover:text-red-400 bg-transparent border-none cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-0.5"
+                  title="Dismiss"
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
 
 export default function DashboardLayout({
@@ -33,6 +185,9 @@ export default function DashboardLayout({
   const [settingsTab, setSettingsTab] = useState<'profile' | 'password'>('profile')
   const [saving, setSaving] = useState(false)
   const [settingsMsg, setSettingsMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [notifOpen, setNotifOpen] = useState(false)
+  const notifRef = useRef<HTMLDivElement>(null)
+  const { notifications, unreadCount, markAllRead, markOneRead, dismiss, clearAll } = useNotifications(user?.id, token)
 
   // Profile form state
   const [fullName, setFullName] = useState('')
@@ -43,6 +198,17 @@ export default function DashboardLayout({
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+
+  useEffect(() => {
+    if (!notifOpen) return
+    function handler(e: MouseEvent) {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setNotifOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [notifOpen])
 
   const initials = user?.full_name
     ?.split(' ')
@@ -155,15 +321,32 @@ export default function DashboardLayout({
         </div>
         <div className="flex items-center gap-1">
           {/* Notifications */}
-          <button
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-white/25 hover:text-white/60 hover:bg-white/[0.06] transition-all bg-transparent border-none cursor-pointer relative"
-            title="Notifications"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-            </svg>
-          </button>
+          <div ref={notifRef} className="relative">
+            <button
+              onClick={() => { setNotifOpen(o => { if (!o) markAllRead(); return !o }) }}
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-white/25 hover:text-white/60 hover:bg-white/[0.06] transition-all bg-transparent border-none cursor-pointer relative"
+              title="Notifications"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#FF5533] text-white text-[9px] font-bold flex items-center justify-center leading-none">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
+            {notifOpen && (
+              <NotificationPanel
+                notifications={notifications}
+                onDismiss={dismiss}
+                onMarkOneRead={markOneRead}
+                onClearAll={() => { clearAll(); setNotifOpen(false) }}
+                onClose={() => setNotifOpen(false)}
+              />
+            )}
+          </div>
           {/* Settings */}
           <button
             onClick={openSettings}

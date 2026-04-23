@@ -6,11 +6,14 @@ import DashboardLayout, { type NavItem } from '../components/DashboardLayout'
 import {
   getMyCourses, createCourse, addSection, uploadMaterial, togglePublish, listPublishedCourses,
   getMyStudents, getEnrolledCourses, enrollInCourse, unenrollFromCourse, deleteCourse,
-  type CourseOut, type SectionOut, type CourseStudentsOut,
+  uploadPdfForGeneration, pollGenerationJob, importGeneratedCourse,
+  type CourseOut, type SectionOut, type CourseStudentsOut, type GenerationJob,
 } from '../api/course'
 import { listCategories, type CategoryOut } from '../api/category'
 import { getIncomingChatRequests, reviewChatRequest, getAutoRefuse, setAutoRefuse, type ChatRequestOut } from '../api/chat'
 import ChatRoom from '../components/ChatRoom'
+import FriendsMessenger from '../components/FriendsMessenger'
+import FindFriends from '../components/FindFriends'
 import {
   listUniversities, listRegions, submitJoinRequest, listJoinRequests, cancelJoinRequest,
   type UniversityOut, type JoinRequestOut, type RegionOut,
@@ -56,6 +59,17 @@ const GraduationCapIcon = () => (
     <path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" />
   </svg>
 )
+const MessagesIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  </svg>
+)
+const AddFriendIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+    <line x1="19" y1="8" x2="19" y2="14" /><line x1="22" y1="11" x2="16" y2="11" />
+  </svg>
+)
 
 const NAV: NavItem[] = [
   { id: 'home', label: 'Home', icon: <HomeIcon /> },
@@ -64,6 +78,8 @@ const NAV: NavItem[] = [
   { id: 'my-learning', label: 'My Learning', icon: <GraduationCapIcon /> },
   { id: 'students', label: 'Students', icon: <UsersIcon /> },
   { id: 'chat', label: 'Chat Requests', icon: <ChatIcon /> },
+  { id: 'messages', label: 'Messages', icon: <MessagesIcon /> },
+  { id: 'find-friends', label: 'Find Friends', icon: <AddFriendIcon /> },
   { id: 'analytics', label: 'Analytics', icon: <TrendIcon /> },
 ]
 
@@ -590,6 +606,51 @@ function CourseManager({ token, course, onBack, onRefresh }: {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
+  /* ── AI generation modal state ── */
+  const [showAI, setShowAI] = useState(false)
+  const [aiFile, setAiFile] = useState<File | null>(null)
+  const [aiDifficulty, setAiDifficulty] = useState('intermediate')
+  const [aiPhase, setAiPhase] = useState<'idle' | 'uploading' | 'processing' | 'done' | 'error'>('idle')
+  const [aiJob, setAiJob] = useState<GenerationJob | null>(null)
+  const [aiError, setAiError] = useState('')
+  const aiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const stopPolling = () => {
+    if (aiPollRef.current) { clearInterval(aiPollRef.current); aiPollRef.current = null }
+  }
+
+  const resetAI = () => {
+    stopPolling()
+    setAiFile(null); setAiPhase('idle'); setAiJob(null); setAiError('')
+  }
+
+  const handleAIUpload = async () => {
+    if (!aiFile) return
+    setAiPhase('uploading'); setAiError('')
+    try {
+      const { job_id } = await uploadPdfForGeneration(token, aiFile, aiDifficulty)
+      setAiPhase('processing')
+      aiPollRef.current = setInterval(async () => {
+        try {
+          const job = await pollGenerationJob(token, job_id)
+          setAiJob(job)
+          if (job.status === 'completed') { stopPolling(); setAiPhase('done') }
+          if (job.status === 'failed') { stopPolling(); setAiError(job.error ?? 'Generation failed'); setAiPhase('error') }
+        } catch { stopPolling(); setAiError('Lost connection to server'); setAiPhase('error') }
+      }, 3000)
+    } catch (e: any) { setAiError(e.message); setAiPhase('error') }
+  }
+
+  const handleAIImport = async () => {
+    if (!aiJob?.job_id) return
+    setAiPhase('uploading')
+    try {
+      await importGeneratedCourse(token, aiJob.job_id, current.id)
+      await refresh()
+      setShowAI(false); resetAI()
+    } catch (e: any) { setAiError(e.message); setAiPhase('error') }
+  }
+
   const refresh = async () => {
     const courses = await getMyCourses(token)
     const updated = courses.find(c => c.id === current.id)
@@ -636,6 +697,7 @@ function CourseManager({ token, course, onBack, onRefresh }: {
     video: <svg className="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" /></svg>,
     audio: <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" /></svg>,
     exercise: <svg className="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>,
+    lesson: <svg className="w-5 h-5 text-violet-500" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>,
   }
 
   return (
@@ -729,8 +791,180 @@ function CourseManager({ token, course, onBack, onRefresh }: {
       {/* Sections Header */}
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Course sections</h3>
-        <span className="text-xs text-slate-400">{current.sections.length} section{current.sections.length !== 1 ? 's' : ''}</span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-slate-400">{current.sections.length} section{current.sections.length !== 1 ? 's' : ''}</span>
+          <button
+            onClick={() => { resetAI(); setShowAI(true) }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-50 text-violet-600 hover:bg-violet-100 border border-violet-200 transition-all duration-200"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+            </svg>
+            Generate from PDF
+          </button>
+        </div>
       </div>
+
+      {/* ── AI Generation Modal ── */}
+      {showAI && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-violet-100 flex items-center justify-center">
+                  <svg className="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-900">Generate from PDF</p>
+                  <p className="text-xs text-slate-500">AI builds sections & lessons automatically</p>
+                </div>
+              </div>
+              <button onClick={() => { setShowAI(false); resetAI() }} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 transition-colors">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            <div className="px-6 py-5">
+              {/* IDLE / UPLOADING phase — form */}
+              {(aiPhase === 'idle' || aiPhase === 'uploading') && (
+                <div className="space-y-4">
+                  {/* PDF drop zone */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2">PDF file</label>
+                    <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl cursor-pointer transition-all duration-200 ${aiFile ? 'border-violet-400 bg-violet-50' : 'border-slate-200 bg-slate-50 hover:border-violet-300 hover:bg-violet-50/50'}`}>
+                      <input type="file" accept=".pdf" className="hidden" onChange={e => setAiFile(e.target.files?.[0] ?? null)} />
+                      {aiFile ? (
+                        <div className="flex flex-col items-center gap-1.5">
+                          <svg className="w-7 h-7 text-violet-500" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
+                          <p className="text-sm font-semibold text-violet-700">{aiFile.name}</p>
+                          <p className="text-xs text-slate-400">{(aiFile.size / 1024 / 1024).toFixed(1)} MB · Click to change</p>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center gap-1.5">
+                          <svg className="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
+                          <p className="text-sm font-medium text-slate-600">Click to upload PDF</p>
+                          <p className="text-xs text-slate-400">Max 20 MB</p>
+                        </div>
+                      )}
+                    </label>
+                  </div>
+
+                  {/* Difficulty */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2">Difficulty level</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(['beginner', 'intermediate', 'advanced'] as const).map(d => (
+                        <button key={d} type="button" onClick={() => setAiDifficulty(d)}
+                          className={`py-2 rounded-xl text-xs font-semibold border transition-all duration-200 capitalize ${aiDifficulty === d ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}>
+                          {d}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleAIUpload}
+                    disabled={!aiFile || aiPhase === 'uploading'}
+                    className="w-full py-3 rounded-xl text-sm font-bold bg-violet-600 text-white hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400 transition-all duration-200"
+                  >
+                    {aiPhase === 'uploading' ? 'Uploading…' : 'Start Generation'}
+                  </button>
+                </div>
+              )}
+
+              {/* PROCESSING phase */}
+              {aiPhase === 'processing' && (
+                <div className="flex flex-col items-center justify-center py-8 gap-5">
+                  <div className="relative w-16 h-16">
+                    <div className="absolute inset-0 rounded-full border-4 border-violet-100" />
+                    <div className="absolute inset-0 rounded-full border-4 border-t-violet-600 animate-spin" />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <svg className="w-6 h-6 text-violet-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                      </svg>
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm font-bold text-slate-900 mb-1">AI is building your course…</p>
+                    <p className="text-xs text-slate-500 max-w-xs">Extracting content from PDF, generating sections and lesson content. This takes 1–3 minutes.</p>
+                  </div>
+                  {aiJob && (
+                    <div className="w-full bg-slate-50 rounded-xl p-3 text-xs text-slate-500 space-y-1">
+                      <p>📄 File: <span className="font-medium text-slate-700">{aiJob.pdf_filename}</span></p>
+                      <p>🎯 Difficulty: <span className="font-medium text-slate-700 capitalize">{aiJob.difficulty}</span></p>
+                      <p>⏳ Status: <span className="font-medium text-violet-600">Processing…</span></p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* DONE phase — preview */}
+              {aiPhase === 'done' && aiJob?.result && (
+                <div className="space-y-4">
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex items-center gap-2">
+                    <svg className="w-4 h-4 text-emerald-600 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+                    <p className="text-xs font-semibold text-emerald-700">Course generated successfully!</p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Generated title</p>
+                    <p className="text-sm font-bold text-slate-900">{aiJob.result.title}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                      Structure preview — {aiJob.result.sections.length} sections
+                    </p>
+                    <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                      {aiJob.result.sections.map((s, i) => (
+                        <div key={i} className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                          <p className="text-xs font-bold text-slate-800 mb-1.5">{s.title}</p>
+                          <div className="space-y-1">
+                            {s.subsections.map((ss, j) => (
+                              <div key={j} className="flex items-center gap-2">
+                                <div className="w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0" />
+                                <p className="text-xs text-slate-500 truncate">{ss.title}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 pt-1">
+                    <button onClick={() => { setShowAI(false); resetAI() }} className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">
+                      Discard
+                    </button>
+                    <button onClick={handleAIImport} className="flex-1 py-2.5 rounded-xl text-sm font-bold bg-violet-600 text-white hover:bg-violet-700 transition-colors">
+                      Import into Course
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ERROR phase */}
+              {aiPhase === 'error' && (
+                <div className="flex flex-col items-center gap-4 py-6">
+                  <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center">
+                    <svg className="w-7 h-7 text-red-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm font-bold text-slate-900 mb-1">Generation failed</p>
+                    <p className="text-xs text-red-500 max-w-xs">{aiError}</p>
+                  </div>
+                  <button onClick={resetAI} className="px-5 py-2.5 rounded-xl text-sm font-semibold bg-slate-900 text-white hover:bg-slate-700 transition-colors">
+                    Try again
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {current.sections.length === 0 ? (
         <div className="text-center py-12 mb-6 bg-white rounded-2xl border border-dashed border-slate-200">
@@ -2019,74 +2253,76 @@ function MyLearningSection({ token }: { token: string }) {
 export default function ProfessorDashboard() {
   const { user, token } = useAuth()
   const [nav, setNav] = useState('home')
+  // Track which sections have been visited so they mount once and stay alive
+  const [mounted, setMounted] = useState<Set<string>>(() => new Set(['home']))
   const firstName = user?.full_name?.split(' ')[0] || ''
 
-  if (nav === 'courses') {
-    return (
-      <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Professor">
-        <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
-          <BrowseCoursesSection token={token!} currentUserId={user!.id} />
-        </div>
-      </DashboardLayout>
-    )
-  }
+  useEffect(() => {
+    setMounted(prev => {
+      if (prev.has(nav)) return prev
+      const next = new Set(prev)
+      next.add(nav)
+      return next
+    })
+  }, [nav])
 
-  if (nav === 'my-learning') {
-    return (
-      <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Professor">
-        <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
-          <MyLearningSection token={token!} />
-        </div>
-      </DashboardLayout>
-    )
-  }
+  const knownNavIds = new Set(['home', 'courses', 'my-learning', 'my-courses', 'students', 'chat', 'messages', 'find-friends'])
 
-  if (nav === 'my-courses') {
-    return (
-      <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Professor">
-        <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
-          <CoursesSection token={token!} />
-        </div>
-      </DashboardLayout>
-    )
-  }
+  return (
+    <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Professor">
 
-  if (nav === 'students') {
-    return (
-      <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Professor">
-        <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
-          <MyStudentsSection token={token!} />
-        </div>
-      </DashboardLayout>
-    )
-  }
+      {/* ── Browse Courses ── */}
+      <div className={nav !== 'courses' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
+        {mounted.has('courses') && <BrowseCoursesSection token={token!} currentUserId={user!.id} />}
+      </div>
 
-  if (nav === 'chat') {
-    return (
-      <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Professor">
-        <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
-          <IncomingChatRequestsSection token={token!} currentUserId={user!.id} />
-        </div>
-      </DashboardLayout>
-    )
-  }
+      {/* ── My Learning ── */}
+      <div className={nav !== 'my-learning' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
+        {mounted.has('my-learning') && <MyLearningSection token={token!} />}
+      </div>
 
-  if (nav !== 'home') {
-    return (
-      <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Professor">
+      {/* ── My Courses ── */}
+      <div className={nav !== 'my-courses' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
+        {mounted.has('my-courses') && <CoursesSection token={token!} />}
+      </div>
+
+      {/* ── Students ── */}
+      <div className={nav !== 'students' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
+        {mounted.has('students') && <MyStudentsSection token={token!} />}
+      </div>
+
+      {/* ── Chat ── */}
+      <div className={nav !== 'chat' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
+        {mounted.has('chat') && <IncomingChatRequestsSection token={token!} currentUserId={user!.id} />}
+      </div>
+
+      {/* ── Messages ── */}
+      <div className={nav !== 'messages' ? 'hidden' : 'max-w-[1100px] mx-auto px-6 md:px-10 py-8'}>
+        {mounted.has('messages') && <FriendsMessenger token={token!} currentUserId={user!.id} />}
+      </div>
+
+      {/* ── Find Friends ── */}
+      <div className={nav !== 'find-friends' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
+        {mounted.has('find-friends') && (
+          <>
+            <h2 className="text-[1.3rem] font-bold text-[#0C0C0F] mb-6">Find Friends</h2>
+            <FindFriends token={token!} />
+          </>
+        )}
+      </div>
+
+      {/* ── Coming-soon sections ── */}
+      {!knownNavIds.has(nav) && (
         <div className="flex-1 flex items-center justify-center min-h-[60vh]">
           <div className="text-center">
             <h2 className="text-[1.1rem] font-bold text-[#0C0C0F]">{NAV.find(n => n.id === nav)?.label}</h2>
             <p className="text-[0.82rem] text-[#94A3B8] mt-1">Coming soon</p>
           </div>
         </div>
-      </DashboardLayout>
-    )
-  }
+      )}
 
-  return (
-    <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Professor">
-      <div className="max-w-[960px] mx-auto px-6 md:px-10 py-8">
+      {/* ── Home ── */}
+      <div className={nav !== 'home' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
 
         {/* Hero */}
         <div className="mb-10 relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#0F172A] via-[#111827] to-[#0B0F1F] text-white shadow-[0_25px_80px_rgba(15,23,42,0.35)] border border-white/10">
