@@ -7,7 +7,11 @@ from sqlalchemy.orm import Session
 from app.models.user import User
 from app.models.courses import Course
 from app.models.course_section import CourseSection
+from app.models.course_subsection import CourseSubsection
 from app.models.course_material import CourseMaterial
+from app.models.course_progress import CourseProgress
+from app.models.course_feedback import CourseFeedback
+from app.models.lesson_block import LessonBlock
 from app.models.enrollment import Enrollment
 from app.models.category import Category
 from app.schemas.course import CourseOut
@@ -193,10 +197,19 @@ def delete_course(course_id: str, db: Session) -> dict:
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
 
+    # Must delete progress first — it has FKs to subsections and materials
+    db.query(CourseProgress).filter(CourseProgress.course_id == course.id).delete()
+
     sections = db.query(CourseSection).filter(CourseSection.course_id == course.id).all()
     for s in sections:
         db.query(CourseMaterial).filter(CourseMaterial.section_id == s.id).delete()
+        db.query(LessonBlock).filter(LessonBlock.section_id == s.id, LessonBlock.subsection_id == None).delete()
+        subsections = db.query(CourseSubsection).filter(CourseSubsection.section_id == s.id).all()
+        for sub in subsections:
+            db.query(LessonBlock).filter(LessonBlock.subsection_id == sub.id).delete()
+        db.query(CourseSubsection).filter(CourseSubsection.section_id == s.id).delete()
     db.query(CourseSection).filter(CourseSection.course_id == course.id).delete()
+    db.query(CourseFeedback).filter(CourseFeedback.course_id == course.id).delete()
     db.query(Enrollment).filter(Enrollment.course_id == course.id).delete()
     db.delete(course)
     db.commit()

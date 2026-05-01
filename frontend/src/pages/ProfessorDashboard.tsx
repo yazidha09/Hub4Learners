@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import Markdown from 'react-markdown'
+import RichTextEditor from '../components/RichTextEditor'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import DashboardLayout, { type NavItem } from '../components/DashboardLayout'
 import {
-  getMyCourses, createCourse, addSection, uploadMaterial, togglePublish, listPublishedCourses,
-  getMyStudents, getEnrolledCourses, enrollInCourse, unenrollFromCourse, deleteCourse,
-  uploadPdfForGeneration, pollGenerationJob, importGeneratedCourse,
-  type CourseOut, type SectionOut, type CourseStudentsOut, type GenerationJob,
+  getMyCourses, getCourseDetail, createCourse, addSection, addSubsection, togglePublish, listPublishedCourses,
+  getMyStudents, getEnrolledCourses, enrollInCourse, unenrollFromCourse, deleteCourse, deleteSection,
+  addLessonBlock, deleteLessonBlock, updateLessonBlock,
+  uploadPdfForGeneration, pollGenerationJob, importGeneratedCourse, regenerateSubsection,
+  type CourseOut, type SubsectionOut, type LessonBlockOut, type CourseStudentsOut, type GenerationJob,
 } from '../api/course'
 import { listCategories, type CategoryOut } from '../api/category'
 import { getIncomingChatRequests, reviewChatRequest, getAutoRefuse, setAutoRefuse, type ChatRequestOut } from '../api/chat'
@@ -18,6 +20,7 @@ import {
   listUniversities, listRegions, submitJoinRequest, listJoinRequests, cancelJoinRequest,
   type UniversityOut, type JoinRequestOut, type RegionOut,
 } from '../api/org'
+import { getMyAnnouncements, type AnnouncementOut } from '../api/admin'
 import {
   submitVerification, listVerifications, cancelVerification,
   type ProfVerificationOut,
@@ -71,7 +74,13 @@ const AddFriendIcon = () => (
   </svg>
 )
 
-const NAV: NavItem[] = [
+const MegaphoneIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 11l19-9-9 19-2-8-8-2z" />
+  </svg>
+)
+
+const BASE_NAV: NavItem[] = [
   { id: 'home', label: 'Home', icon: <HomeIcon /> },
   { id: 'courses', label: 'Courses', icon: <BookIcon /> },
   { id: 'my-courses', label: 'My Courses', icon: <FolderIcon /> },
@@ -82,6 +91,7 @@ const NAV: NavItem[] = [
   { id: 'find-friends', label: 'Find Friends', icon: <AddFriendIcon /> },
   { id: 'analytics', label: 'Analytics', icon: <TrendIcon /> },
 ]
+const ANNOUNCEMENTS_NAV_ITEM: NavItem = { id: 'announcements', label: 'Announcements', icon: <MegaphoneIcon /> }
 
 /* ── Mock data (home only) ── */
 const ACTIVITY = [
@@ -90,19 +100,9 @@ const ACTIVITY = [
   { student: 'Karim M.', action: 'completed Quiz 5 in', course: 'Neural Networks', time: '1h ago' },
 ]
 
-const MATERIAL_TYPES = [
-  { value: 'pdf', label: 'PDF', accept: '.pdf' },
-  { value: 'video', label: 'Video', accept: '.mp4,.webm,.mov,.avi' },
-  { value: 'audio', label: 'Audio', accept: '.mp3,.wav,.ogg,.m4a' },
-  { value: 'exercise', label: 'Exercise', accept: '.pdf,.docx,.zip,.txt' },
-]
-
-/* ── Shared input style ── */
-const inputCls = 'h-10 px-3 border border-[#E5E7EB] rounded-lg text-[0.87rem] text-[#0C0C0F] bg-white outline-none placeholder:text-[#C4C9D4] focus:border-[#0C0C0F] focus:shadow-[0_0_0_3px_rgba(12,12,15,0.07)] transition-[border-color,box-shadow] w-full'
-
 /* ── Professor Verification Banner ── */
 function VerificationBanner({ token }: { token: string }) {
-  const { refreshUser } = useAuth()
+  const { } = useAuth()
   const [regions, setRegions] = useState<RegionOut[]>([])
   const [requests, setRequests] = useState<ProfVerificationOut[]>([])
   const [showForm, setShowForm] = useState(false)
@@ -463,132 +463,292 @@ function FilePicker({ accept, file, onChange, placeholder = 'Click to select fil
   )
 }
 
-/* ── Upload Material inline form ── */
-function UploadMaterialForm({ token, courseId, section, onDone }: {
-  token: string; courseId: string; section: SectionOut; onDone: () => void
+/* ── Lesson block editor ── */
+function LessonEditor({ token, courseId, subsection, onRefresh }: {
+  token: string; courseId: string; subsection: SubsectionOut; onRefresh: () => void
 }) {
-  const [title, setTitle] = useState('')
-  const [matType, setMatType] = useState('pdf')
-  const [file, setFile] = useState<File | null>(null)
+  const [blocks, setBlocks] = useState<LessonBlockOut[]>(
+    [...(subsection.blocks || [])].sort((a, b) => a.order_index - b.order_index)
+  )
+  const [addingType, setAddingType] = useState<'text' | 'image' | 'video' | null>(null)
+  const [textContent, setTextContent] = useState('')
+  const [mediaFile, setMediaFile] = useState<File | null>(null)
+  const [caption, setCaption] = useState('')
   const [saving, setSaving] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [err, setErr] = useState('')
+  const [editingBlockId, setEditingBlockId] = useState<string | null>(null)
+  const [editingContent, setEditingContent] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
 
-  const currentAccept = MATERIAL_TYPES.find(t => t.value === matType)?.accept ?? '*'
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!title.trim() || !file) return
+  const addTextBlock = async () => {
+    if (!textContent.trim()) return
     setSaving(true); setErr('')
     try {
       const fd = new FormData()
-      fd.append('title', title.trim())
-      fd.append('mat_type', matType)
-      fd.append('order_index', String(section.materials.length))
-      fd.append('file', file)
-      await uploadMaterial(token, courseId, section.id, fd)
-      onDone()
-    } catch (e: any) { setErr(e.message) } finally { setSaving(false) }
+      fd.append('block_type', 'text')
+      fd.append('content', textContent.trim())
+      fd.append('order_index', String(blocks.length))
+      const block = await addLessonBlock(token, courseId, subsection.id, fd)
+      setBlocks(prev => [...prev, block])
+      setTextContent(''); setAddingType(null)
+      onRefresh()
+    } catch (e: any) { setErr(e.message) }
+    finally { setSaving(false) }
   }
 
-  const typeIcons: Record<string, React.ReactNode> = {
-    pdf: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>,
-    video: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" /></svg>,
-    audio: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" /></svg>,
-    exercise: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>,
+  const addMediaBlock = async () => {
+    if (!mediaFile || !addingType || addingType === 'text') return
+    setSaving(true); setErr('')
+    try {
+      const fd = new FormData()
+      fd.append('block_type', addingType)
+      fd.append('file', mediaFile)
+      if (caption.trim()) fd.append('caption', caption.trim())
+      fd.append('order_index', String(blocks.length))
+      const block = await addLessonBlock(token, courseId, subsection.id, fd)
+      setBlocks(prev => [...prev, block])
+      setMediaFile(null); setCaption(''); setAddingType(null)
+      onRefresh()
+    } catch (e: any) { setErr(e.message) }
+    finally { setSaving(false) }
+  }
+
+  const removeBlock = async (blockId: string) => {
+    setDeletingId(blockId)
+    try {
+      await deleteLessonBlock(token, blockId)
+      setBlocks(prev => prev.filter(b => b.id !== blockId))
+      onRefresh()
+    } catch (e: any) { setErr(e.message) }
+    finally { setDeletingId(null) }
+  }
+
+  const cancelAdd = () => {
+    setAddingType(null); setTextContent(''); setMediaFile(null); setCaption('')
+  }
+
+  const startEditBlock = (block: LessonBlockOut) => {
+    setEditingBlockId(block.id)
+    setEditingContent(block.content ?? '')
+    setAddingType(null)
+  }
+
+  const cancelEditBlock = () => {
+    setEditingBlockId(null); setEditingContent('')
+  }
+
+  const saveBlockEdit = async () => {
+    if (!editingBlockId) return
+    setEditSaving(true); setErr('')
+    try {
+      const updated = await updateLessonBlock(token, editingBlockId, editingContent)
+      setBlocks(prev => prev.map(b => b.id === editingBlockId ? updated : b))
+      setEditingBlockId(null); setEditingContent('')
+      onRefresh()
+    } catch (e: any) { setErr(e.message) }
+    finally { setEditSaving(false) }
   }
 
   return (
-    <form 
-      onSubmit={handleSubmit} 
-      className="mt-4 p-5 bg-gradient-to-br from-slate-50 to-slate-100/50 border border-slate-200 rounded-xl flex flex-col gap-4 animate-fadeIn"
-      style={{ animation: 'fadeInUp 0.3s ease-out' }}
-    >
-      <div className="flex items-center gap-2">
-        <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center">
-          <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-          </svg>
-        </div>
-        <span className="text-sm font-semibold text-slate-800">Upload new material</span>
-      </div>
-
+    <div className="border-t border-slate-100 bg-[#FAFAFA] px-5 py-5 flex flex-col gap-4">
       {err && (
-        <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
-          <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-          </svg>
+        <div className="flex items-center gap-2 px-3 py-2.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600">
+          <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
           {err}
         </div>
       )}
 
-      <div>
-        <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Material title</label>
-        <input 
-          className="w-full h-11 px-4 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100 transition-all duration-200" 
-          placeholder="e.g. Chapter 1: Introduction" 
-          value={title} 
-          onChange={e => setTitle(e.target.value)} 
-        />
-      </div>
+      {/* Existing blocks */}
+      {blocks.length === 0 ? (
+        <div className="text-center py-8 text-sm text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
+          No content yet — add a text, image, or video block below.
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {blocks.map(block => {
+            const isEditing = editingBlockId === block.id
+            return (
+              <div key={block.id} className={`bg-white border rounded-xl overflow-hidden transition-colors duration-150 ${isEditing ? 'border-blue-300' : 'border-slate-200 hover:border-slate-300'}`}>
+                {/* Header row */}
+                <div className="group flex items-start gap-3 p-3.5">
+                  {/* Block type icon */}
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm font-bold ${
+                    block.block_type === 'text' ? 'bg-blue-50 text-blue-600' :
+                    block.block_type === 'image' ? 'bg-emerald-50 text-emerald-600' :
+                    'bg-purple-50 text-purple-600'
+                  }`}>
+                    {block.block_type === 'text' ? 'Aa' :
+                     block.block_type === 'image' ? (
+                       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                     ) : (
+                       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                     )}
+                  </div>
 
-      <div>
-        <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Material type</label>
-        <div className="flex gap-2 flex-wrap">
-          {MATERIAL_TYPES.map(t => (
-            <button 
-              key={t.value} 
-              type="button"
-              onClick={() => { setMatType(t.value); setFile(null) }}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold border-2 transition-all duration-200 ${
-                matType === t.value 
-                  ? 'bg-slate-900 text-white border-slate-900 shadow-lg shadow-slate-900/20' 
-                  : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400 hover:bg-slate-50'
+                  {/* Content preview */}
+                  <div className="flex-1 min-w-0">
+                    {block.block_type === 'text' ? (
+                      <p className="text-sm text-slate-600 leading-relaxed line-clamp-2" dangerouslySetInnerHTML={{ __html: block.content ?? '' }} />
+                    ) : (
+                      <div>
+                        <p className="text-sm font-medium text-slate-700 truncate">
+                          {block.file_url?.split('/').pop() ?? 'file'}
+                        </p>
+                        {block.caption && (
+                          <p className="text-xs text-slate-500 mt-0.5 truncate">{block.caption}</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Edit (text blocks only) */}
+                  {block.block_type === 'text' && (
+                    <button
+                      onClick={() => isEditing ? cancelEditBlock() : startEditBlock(block)}
+                      className={`shrink-0 px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                        isEditing
+                          ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          : 'opacity-0 group-hover:opacity-100 bg-blue-50 text-blue-600 hover:bg-blue-100'
+                      }`}
+                    >
+                      {isEditing ? 'Cancel' : 'Edit'}
+                    </button>
+                  )}
+
+                  {/* Delete */}
+                  <button
+                    onClick={() => removeBlock(block.id)}
+                    disabled={deletingId === block.id}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all duration-150 shrink-0"
+                  >
+                    {deletingId === block.id ? (
+                      <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                      </svg>
+                    ) : (
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                      </svg>
+                    )}
+                  </button>
+                </div>
+
+                {/* Inline editor for text blocks */}
+                {isEditing && (
+                  <div className="border-t border-slate-100">
+                    <RichTextEditor
+                      value={editingContent}
+                      onChange={setEditingContent}
+                    />
+                    <div className="flex gap-2 justify-end px-4 py-3 border-t border-slate-100 bg-[#F8F9FA]">
+                      <button onClick={cancelEditBlock} className="px-4 py-2 text-sm font-semibold text-slate-500 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
+                        Cancel
+                      </button>
+                      <button
+                        onClick={saveBlockEdit}
+                        disabled={editSaving}
+                        className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                      >
+                        {editSaving && <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>}
+                        {editSaving ? 'Saving…' : 'Save changes'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Inline add forms */}
+      {addingType === 'text' && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col gap-0">
+          <div className="px-4 pt-3 pb-2">
+            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Lesson content</label>
+          </div>
+          <RichTextEditor
+            value={textContent}
+            onChange={setTextContent}
+            placeholder="Write your lesson content here — use the toolbar to add headings, bold, colors…"
+          />
+          <div className="flex gap-2 justify-end px-4 py-3 border-t border-slate-100 bg-[#F8F9FA]">
+            <button onClick={cancelAdd} className="px-4 py-2 text-sm font-semibold text-slate-500 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">Cancel</button>
+            <button
+              onClick={addTextBlock}
+              disabled={!textContent || textContent === '<p></p>' || saving}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {saving ? <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> : null}
+              {saving ? 'Adding…' : 'Add Text Block'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {(addingType === 'image' || addingType === 'video') && (
+        <div className={`bg-white border rounded-xl p-4 flex flex-col gap-3 ${addingType === 'image' ? 'border-emerald-200' : 'border-purple-200'}`}>
+          <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+            {addingType === 'image' ? 'Image file' : 'Video file'}
+          </label>
+          <FilePicker
+            accept={addingType === 'image' ? '.jpg,.jpeg,.png,.gif,.webp' : '.mp4,.webm,.mov'}
+            file={mediaFile}
+            onChange={setMediaFile}
+            placeholder={addingType === 'image' ? 'Click to select image (JPG, PNG, GIF, WEBP)' : 'Click to select video (MP4, WEBM, MOV)'}
+          />
+          <input
+            className="h-10 px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-400 transition-colors"
+            placeholder="Caption (optional)"
+            value={caption}
+            onChange={e => setCaption(e.target.value)}
+          />
+          <div className="flex gap-2 justify-end">
+            <button onClick={cancelAdd} className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors">Cancel</button>
+            <button
+              onClick={addMediaBlock}
+              disabled={!mediaFile || saving}
+              className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
+                addingType === 'image' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-purple-600 hover:bg-purple-700'
               }`}
             >
-              {typeIcons[t.value]}
-              {t.label}
+              {saving ? <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> : null}
+              {saving ? 'Uploading…' : `Add ${addingType === 'image' ? 'Image' : 'Video'}`}
             </button>
-          ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      <div>
-        <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">File</label>
-        <FilePicker accept={currentAccept} file={file} onChange={setFile} />
-      </div>
-
-      <div className="flex gap-3 justify-end pt-2">
-        <button 
-          type="button" 
-          onClick={onDone}
-          className="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 bg-white border border-slate-200 hover:border-slate-400 hover:bg-slate-50 transition-all duration-200 cursor-pointer"
-        >
-          Cancel
-        </button>
-        <button 
-          type="submit" 
-          disabled={!title.trim() || !file || saving}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold bg-slate-900 text-white border-none cursor-pointer hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed transition-all duration-200 shadow-lg shadow-slate-900/20"
-        >
-          {saving ? (
-            <>
-              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-              Uploading...
-            </>
-          ) : (
-            <>
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-              </svg>
-              Upload
-            </>
-          )}
-        </button>
-      </div>
-    </form>
+      {/* Add content buttons */}
+      {!addingType && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide mr-1">Add:</span>
+          <button
+            onClick={() => setAddingType('text')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 transition-all duration-200"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7"/></svg>
+            Text
+          </button>
+          <button
+            onClick={() => setAddingType('image')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-200 transition-all duration-200"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            Image
+          </button>
+          <button
+            onClick={() => setAddingType('video')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-50 text-purple-600 hover:bg-purple-100 border border-purple-200 transition-all duration-200"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Video
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -599,12 +759,19 @@ function CourseManager({ token, course, onBack, onRefresh }: {
   const { user } = useAuth()
   const [sectionTitle, setSectionTitle] = useState('')
   const [addingSec, setAddingSec] = useState(false)
-  const [uploadingFor, setUploadingFor] = useState<string | null>(null)
+  const [editingFor, setEditingFor] = useState<string | null>(null)
+  const [subsectionTitles, setSubsectionTitles] = useState<Record<string, string>>({})
+  const [addingSubFor, setAddingSubFor] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [publishErr, setPublishErr] = useState('')
   const [current, setCurrent] = useState(course)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [deleteErr, setDeleteErr] = useState('')
+  const [sectionErr, setSectionErr] = useState('')
+  const [subsectionErrs, setSubsectionErrs] = useState<Record<string, string>>({})
+  const [deletingSectionId, setDeletingSectionId] = useState<string | null>(null)
+  const [confirmDeleteSectionId, setConfirmDeleteSectionId] = useState<string | null>(null)
 
   /* ── AI generation modal state ── */
   const [showAI, setShowAI] = useState(false)
@@ -615,6 +782,12 @@ function CourseManager({ token, course, onBack, onRefresh }: {
   const [aiError, setAiError] = useState('')
   const aiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  /* ── AI editor state (after generation) ── */
+  const [editedResult, setEditedResult] = useState<GenerationJob['result'] | null>(null)
+  const [expandedAiSection, setExpandedAiSection] = useState<number | null>(0)
+  const [editingAiSub, setEditingAiSub] = useState<{ si: number; ssi: number } | null>(null)
+  const [regenning, setRegenning] = useState<{ si: number; ssi: number } | null>(null)
+
   const stopPolling = () => {
     if (aiPollRef.current) { clearInterval(aiPollRef.current); aiPollRef.current = null }
   }
@@ -622,6 +795,7 @@ function CourseManager({ token, course, onBack, onRefresh }: {
   const resetAI = () => {
     stopPolling()
     setAiFile(null); setAiPhase('idle'); setAiJob(null); setAiError('')
+    setEditedResult(null); setExpandedAiSection(0); setEditingAiSub(null); setRegenning(null)
   }
 
   const handleAIUpload = async () => {
@@ -634,7 +808,12 @@ function CourseManager({ token, course, onBack, onRefresh }: {
         try {
           const job = await pollGenerationJob(token, job_id)
           setAiJob(job)
-          if (job.status === 'completed') { stopPolling(); setAiPhase('done') }
+          if (job.status === 'completed') {
+            stopPolling()
+            setAiPhase('done')
+            setEditedResult(job.result ?? null)
+            setExpandedAiSection(0)
+          }
           if (job.status === 'failed') { stopPolling(); setAiError(job.error ?? 'Generation failed'); setAiPhase('error') }
         } catch { stopPolling(); setAiError('Lost connection to server'); setAiPhase('error') }
       }, 3000)
@@ -645,27 +824,99 @@ function CourseManager({ token, course, onBack, onRefresh }: {
     if (!aiJob?.job_id) return
     setAiPhase('uploading')
     try {
-      await importGeneratedCourse(token, aiJob.job_id, current.id)
+      await importGeneratedCourse(token, aiJob.job_id, current.id, editedResult ?? undefined)
       await refresh()
       setShowAI(false); resetAI()
     } catch (e: any) { setAiError(e.message); setAiPhase('error') }
   }
 
+  const handleAIRegen = async (si: number, ssi: number) => {
+    if (!aiJob?.job_id || regenning) return
+    setRegenning({ si, ssi })
+    try {
+      const res = await regenerateSubsection(token, aiJob.job_id, si, ssi)
+      setEditedResult(prev => {
+        if (!prev) return prev
+        const updated = JSON.parse(JSON.stringify(prev))
+        updated.sections[si].subsections[ssi].content = res.content
+        return updated
+      })
+    } catch { /* silently ignore — user can try again */ }
+    finally { setRegenning(null) }
+  }
+
+  const updateAiSectionTitle = (si: number, title: string) => {
+    setEditedResult(prev => {
+      if (!prev) return prev
+      const updated = JSON.parse(JSON.stringify(prev))
+      updated.sections[si].title = title
+      return updated
+    })
+  }
+
+  const updateAiSubTitle = (si: number, ssi: number, title: string) => {
+    setEditedResult(prev => {
+      if (!prev) return prev
+      const updated = JSON.parse(JSON.stringify(prev))
+      updated.sections[si].subsections[ssi].title = title
+      return updated
+    })
+  }
+
+  const updateAiSubContent = (si: number, ssi: number, html: string) => {
+    setEditedResult(prev => {
+      if (!prev) return prev
+      const updated = JSON.parse(JSON.stringify(prev))
+      updated.sections[si].subsections[ssi].content = html
+      return updated
+    })
+  }
+
   const refresh = async () => {
-    const courses = await getMyCourses(token)
-    const updated = courses.find(c => c.id === current.id)
-    if (updated) { setCurrent(updated); onRefresh(updated) }
+    const updated = await getCourseDetail(current.id)
+    setCurrent(updated); onRefresh(updated)
   }
 
   const handleAddSection = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!sectionTitle.trim()) return
     setAddingSec(true)
+    setSectionErr('')
     try {
       await addSection(token, current.id, sectionTitle.trim(), current.sections.length)
       setSectionTitle('')
       await refresh()
+    } catch (e: any) {
+      setSectionErr(e.message || 'Failed to add section')
     } finally { setAddingSec(false) }
+  }
+
+  const handleAddSubsection = async (sectionId: string) => {
+    const title = subsectionTitles[sectionId]?.trim()
+    if (!title) return
+    setAddingSubFor(sectionId)
+    setSubsectionErrs(prev => ({ ...prev, [sectionId]: '' }))
+    try {
+      const section = current.sections.find(s => s.id === sectionId)
+      const order = section?.subsections?.length ?? 0
+      await addSubsection(token, current.id, sectionId, title, order)
+      setSubsectionTitles(prev => ({ ...prev, [sectionId]: '' }))
+      await refresh()
+    } catch (e: any) {
+      setSubsectionErrs(prev => ({ ...prev, [sectionId]: e.message || 'Failed to add subsection' }))
+    } finally { setAddingSubFor(null) }
+  }
+
+  const handleDeleteSection = async (sectionId: string) => {
+    setDeletingSectionId(sectionId)
+    try {
+      await deleteSection(token, current.id, sectionId)
+      setConfirmDeleteSectionId(null)
+      await refresh()
+    } catch (e: any) {
+      setSectionErr(e.message || 'Failed to delete section')
+      setConfirmDeleteSectionId(null)
+    } finally { setDeletingSectionId(null) }
   }
 
   const handleTogglePublish = async () => {
@@ -681,24 +932,18 @@ function CourseManager({ token, course, onBack, onRefresh }: {
 
   const handleDelete = async () => {
     setDeleting(true)
+    setDeleteErr('')
     try {
       await deleteCourse(token, current.id)
       onBack()
+    } catch (e: any) {
+      setDeleteErr(e.message || 'Failed to delete course')
     } finally {
       setDeleting(false)
-      setShowDeleteConfirm(false)
     }
   }
 
   const canPublish = user?.is_verified !== false || current.is_published
-
-  const typeIcons: Record<string, React.ReactNode> = {
-    pdf: <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>,
-    video: <svg className="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" /></svg>,
-    audio: <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" /></svg>,
-    exercise: <svg className="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>,
-    lesson: <svg className="w-5 h-5 text-violet-500" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>,
-  }
 
   return (
     <div className="max-w-[800px] animate-fadeIn">
@@ -735,6 +980,17 @@ function CourseManager({ token, course, onBack, onRefresh }: {
             </div>
           </div>
           <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => window.open(`/learn/${current.id}?preview=1`, '_blank')}
+              className="flex items-center gap-2 px-3 py-2.5 text-sm font-semibold text-slate-600 bg-slate-50 rounded-xl border border-slate-200 hover:bg-slate-100 transition-all duration-200"
+              title="Preview as student"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              Preview
+            </button>
             <button
               onClick={() => setShowDeleteConfirm(true)}
               className="flex items-center gap-2 px-3 py-2.5 text-sm font-semibold text-red-600 bg-red-50 rounded-xl border border-red-100 hover:bg-red-100 transition-all duration-200"
@@ -808,7 +1064,7 @@ function CourseManager({ token, course, onBack, onRefresh }: {
       {/* ── AI Generation Modal ── */}
       {showAI && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+          <div className={`bg-white rounded-2xl shadow-2xl w-full overflow-hidden transition-all duration-300 ${aiPhase === 'done' ? 'max-w-4xl' : 'max-w-lg'}`}>
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
               <div className="flex items-center gap-3">
@@ -901,45 +1157,127 @@ function CourseManager({ token, course, onBack, onRefresh }: {
                 </div>
               )}
 
-              {/* DONE phase — preview */}
-              {aiPhase === 'done' && aiJob?.result && (
+              {/* DONE phase — review & edit */}
+              {aiPhase === 'done' && editedResult && (
                 <div className="space-y-4">
+                  {/* Banner */}
                   <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex items-center gap-2">
                     <svg className="w-4 h-4 text-emerald-600 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
-                    <p className="text-xs font-semibold text-emerald-700">Course generated successfully!</p>
+                    <p className="text-xs font-semibold text-emerald-700">Course generated! Review and edit before importing.</p>
                   </div>
 
+                  {/* Editable course title */}
                   <div>
-                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Generated title</p>
-                    <p className="text-sm font-bold text-slate-900">{aiJob.result.title}</p>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Course Title</label>
+                    <input
+                      value={editedResult.title}
+                      onChange={e => setEditedResult(prev => prev ? { ...prev, title: e.target.value } : prev)}
+                      className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm font-semibold text-slate-800 focus:outline-none focus:shadow-[0_0_0_3px_rgba(124,58,237,0.12)] transition-shadow"
+                    />
                   </div>
 
+                  {/* Sections accordion */}
                   <div>
-                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                      Structure preview — {aiJob.result.sections.length} sections
-                    </p>
-                    <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-                      {aiJob.result.sections.map((s, i) => (
-                        <div key={i} className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-                          <p className="text-xs font-bold text-slate-800 mb-1.5">{s.title}</p>
-                          <div className="space-y-1">
-                            {s.subsections.map((ss, j) => (
-                              <div key={j} className="flex items-center gap-2">
-                                <div className="w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0" />
-                                <p className="text-xs text-slate-500 truncate">{ss.title}</p>
-                              </div>
-                            ))}
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                        Sections — {editedResult.sections.length} total
+                      </label>
+                      <span className="text-xs text-slate-400">Click a section to expand · Edit titles inline · Regen to rewrite</span>
+                    </div>
+                    <div className="space-y-2 max-h-[52vh] overflow-y-auto pr-1">
+                      {editedResult.sections.map((section, si) => (
+                        <div key={si} className="border border-slate-200 rounded-xl overflow-hidden">
+                          {/* Section header */}
+                          <div
+                            className="flex items-center gap-3 px-4 py-3 bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer select-none"
+                            onClick={() => setExpandedAiSection(expandedAiSection === si ? null : si)}
+                          >
+                            <span className="w-6 h-6 rounded-md bg-violet-100 text-violet-700 text-xs font-bold flex items-center justify-center shrink-0">{si + 1}</span>
+                            <input
+                              value={section.title}
+                              onClick={e => e.stopPropagation()}
+                              onChange={e => updateAiSectionTitle(si, e.target.value)}
+                              className="flex-1 text-sm font-semibold text-slate-800 bg-transparent border-none focus:outline-none min-w-0"
+                            />
+                            <span className="text-xs text-slate-400 shrink-0">{section.subsections.length} lessons</span>
+                            <svg className={`w-4 h-4 text-slate-400 transition-transform shrink-0 ${expandedAiSection === si ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
                           </div>
+
+                          {/* Subsections */}
+                          {expandedAiSection === si && (
+                            <div className="divide-y divide-slate-100 bg-white">
+                              {section.subsections.map((sub, ssi) => {
+                                const isEditing = editingAiSub?.si === si && editingAiSub?.ssi === ssi
+                                const isRegenning = regenning?.si === si && regenning?.ssi === ssi
+                                return (
+                                  <div key={ssi}>
+                                    {/* Subsection row */}
+                                    <div className="flex items-center gap-2 px-4 py-2.5">
+                                      <span className="text-xs text-violet-500 font-mono font-semibold shrink-0 w-8">{si + 1}.{ssi + 1}</span>
+                                      <input
+                                        value={sub.title}
+                                        onChange={e => updateAiSubTitle(si, ssi, e.target.value)}
+                                        className="flex-1 text-sm text-slate-700 bg-transparent border-none focus:outline-none min-w-0"
+                                      />
+                                      {/* Edit toggle */}
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingAiSub(isEditing ? null : { si, ssi })}
+                                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors shrink-0 ${
+                                          isEditing ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                        }`}
+                                      >
+                                        {isEditing ? 'Done' : 'Edit'}
+                                      </button>
+                                      {/* Regenerate button */}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAIRegen(si, ssi)}
+                                        disabled={!!regenning}
+                                        title="AI-regenerate this lesson's content"
+                                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 disabled:opacity-40 transition-colors shrink-0"
+                                      >
+                                        {isRegenning ? (
+                                          <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                                        ) : (
+                                          <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                                        )}
+                                        Regen
+                                      </button>
+                                    </div>
+
+                                    {/* Content editor (only when editing this subsection) */}
+                                    {isEditing && (
+                                      <div className="px-4 pb-4 pt-1">
+                                        <RichTextEditor
+                                          value={sub.content}
+                                          onChange={html => updateAiSubContent(si, ssi, html)}
+                                        />
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
                   </div>
 
-                  <div className="flex gap-3 pt-1">
-                    <button onClick={() => { setShowAI(false); resetAI() }} className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">
+                  {/* Actions */}
+                  <div className="flex gap-3 pt-1 border-t border-slate-100">
+                    <button
+                      onClick={() => { setShowAI(false); resetAI() }}
+                      className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+                    >
                       Discard
                     </button>
-                    <button onClick={handleAIImport} className="flex-1 py-2.5 rounded-xl text-sm font-bold bg-violet-600 text-white hover:bg-violet-700 transition-colors">
+                    <button
+                      onClick={handleAIImport}
+                      className="flex-1 py-2.5 rounded-xl text-sm font-bold bg-violet-600 text-white hover:bg-violet-700 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
                       Import into Course
                     </button>
                   </div>
@@ -980,79 +1318,138 @@ function CourseManager({ token, course, onBack, onRefresh }: {
         <div className="space-y-4 mb-6 stagger-children">
           {current.sections.map((section, idx) => (
             <div key={section.id} className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] overflow-hidden transition-all duration-300 hover:shadow-[0_4px_20px_rgba(0,0,0,0.08)]">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-                <div className="flex items-center gap-3">
-                  <span className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-sm font-bold text-slate-600">
-                    {idx + 1}
-                  </span>
-                  <span className="font-semibold text-slate-900">{section.title}</span>
-                  <span className="text-xs text-slate-400 bg-slate-50 px-2 py-0.5 rounded-full">
-                    {section.materials.length} item{section.materials.length !== 1 ? 's' : ''}
-                  </span>
-                </div>
-                <button
-                  onClick={() => setUploadingFor(uploadingFor === section.id ? null : section.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
-                    uploadingFor === section.id
-                      ? 'bg-slate-900 text-white'
-                      : 'bg-[#FF5533]/10 text-[#FF5533] hover:bg-[#FF5533]/20'
-                  }`}
-                >
-                  {uploadingFor === section.id ? (
-                    <>
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                      Close
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                      </svg>
-                      Add file
-                    </>
-                  )}
-                </button>
+              {/* Section header */}
+              <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-100 bg-slate-50/60">
+                <span className="w-8 h-8 rounded-lg bg-slate-200 flex items-center justify-center text-sm font-bold text-slate-600 shrink-0">
+                  {idx + 1}
+                </span>
+                <span className="font-semibold text-slate-900 flex-1">{section.title}</span>
+                <span className="text-xs text-slate-400 bg-white border border-slate-200 px-2 py-0.5 rounded-full shrink-0">
+                  {section.subsections?.length ?? 0} subsection{(section.subsections?.length ?? 0) !== 1 ? 's' : ''}
+                </span>
+                {confirmDeleteSectionId === section.id ? (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-xs text-slate-500 mr-1">Delete?</span>
+                    <button
+                      onClick={() => handleDeleteSection(section.id)}
+                      disabled={deletingSectionId === section.id}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-colors border-none cursor-pointer"
+                    >
+                      {deletingSectionId === section.id ? (
+                        <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                      ) : null}
+                      Yes, delete
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteSectionId(null)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDeleteSectionId(section.id)}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 border border-transparent hover:border-red-200 transition-all shrink-0 cursor-pointer"
+                    title="Delete section"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                    </svg>
+                  </button>
+                )}
               </div>
 
-              {section.materials.length > 0 && (
-                <div className="divide-y divide-slate-50">
-                  {section.materials.map(m => (
-                    <div key={m.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50/50 transition-colors duration-200">
-                      <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center shrink-0">
-                        {typeIcons[m.type] ?? <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>}
+              {/* Subsection rows */}
+              {(section.subsections || []).length > 0 && (
+                <div className="divide-y divide-slate-100">
+                  {(section.subsections || []).map((sub, subIdx) => (
+                    <div key={sub.id}>
+                      <div className="flex items-center justify-between px-5 py-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="text-xs font-bold text-slate-400 shrink-0 w-8">
+                            {idx + 1}.{subIdx + 1}
+                          </span>
+                          <span className="text-sm font-medium text-slate-800 truncate">{sub.title}</span>
+                          <span className="text-xs text-slate-400 shrink-0">
+                            {sub.blocks.length} block{sub.blocks.length !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => setEditingFor(editingFor === sub.id ? null : sub.id)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 shrink-0 ml-3 ${
+                            editingFor === sub.id
+                              ? 'bg-slate-900 text-white'
+                              : 'bg-[#FF5533]/10 text-[#FF5533] hover:bg-[#FF5533]/20'
+                          }`}
+                        >
+                          {editingFor === sub.id ? (
+                            <>
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                              Close
+                            </>
+                          ) : (
+                            <>
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
+                              </svg>
+                              Edit lesson
+                            </>
+                          )}
+                        </button>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium text-slate-900 truncate">{m.title}</div>
-                        <div className="text-xs text-slate-400 uppercase tracking-wider">{m.type}</div>
-                      </div>
-                      <a
-                        href={`http://localhost:8000/uploads/${m.file_url}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-1.5 text-xs font-semibold text-blue-500 hover:text-blue-600 transition-colors duration-200"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                        </svg>
-                        View
-                      </a>
+
+                      {/* Inline lesson editor for this subsection */}
+                      {editingFor === sub.id && (
+                        <LessonEditor
+                          token={token}
+                          courseId={current.id}
+                          subsection={sub}
+                          onRefresh={async () => { await refresh() }}
+                        />
+                      )}
                     </div>
                   ))}
                 </div>
               )}
 
-              {uploadingFor === section.id && (
-                <div className="px-5 pb-5">
-                  <UploadMaterialForm
-                    token={token}
-                    courseId={current.id}
-                    section={section}
-                    onDone={async () => { setUploadingFor(null); await refresh() }}
+              {/* Add subsection row */}
+              <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/40">
+                {subsectionErrs[section.id] && (
+                  <p className="mb-2 text-xs text-red-500 bg-red-50 border border-red-200 rounded-lg px-2 py-1.5">{subsectionErrs[section.id]}</p>
+                )}
+                <div className="flex items-center gap-2">
+                  <input
+                    className="flex-1 h-9 px-3 bg-white border border-slate-200 rounded-lg text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100 transition-all"
+                    placeholder={`Add subsection to "${section.title}"…`}
+                    value={subsectionTitles[section.id] ?? ''}
+                    onChange={e => {
+                      setSubsectionTitles(prev => ({ ...prev, [section.id]: e.target.value }))
+                      if (subsectionErrs[section.id]) setSubsectionErrs(prev => ({ ...prev, [section.id]: '' }))
+                    }}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddSubsection(section.id) } }}
                   />
+                  <button
+                    onClick={() => handleAddSubsection(section.id)}
+                    disabled={!subsectionTitles[section.id]?.trim() || addingSubFor === section.id}
+                    className="flex items-center gap-1.5 px-3 h-9 bg-slate-900 text-white text-xs font-semibold rounded-lg border-none cursor-pointer hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed transition-all shrink-0"
+                  >
+                    {addingSubFor === section.id ? (
+                      <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                      </svg>
+                    )}
+                    Add subsection
+                  </button>
                 </div>
-              )}
+              </div>
             </div>
           ))}
         </div>
@@ -1071,12 +1468,15 @@ function CourseManager({ token, course, onBack, onRefresh }: {
             <p className="text-xs text-slate-500">Organize your course content into sections</p>
           </div>
         </div>
+        {sectionErr && (
+          <p className="mb-3 text-xs text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{sectionErr}</p>
+        )}
         <form onSubmit={handleAddSection} className="flex gap-3">
           <input
             className="flex-1 h-11 px-4 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100 transition-all duration-200"
             placeholder="Section title (e.g. Introduction, Module 1)"
             value={sectionTitle}
-            onChange={e => setSectionTitle(e.target.value)}
+            onChange={e => { setSectionTitle(e.target.value); if (sectionErr) setSectionErr('') }}
           />
           <button 
             type="submit" 
@@ -1111,9 +1511,12 @@ function CourseManager({ token, course, onBack, onRefresh }: {
             <p className="text-sm text-slate-500 text-center mb-6">
               <span className="font-semibold text-slate-700">"{current.title}"</span> and all its sections, materials, and enrollments will be permanently deleted.
             </p>
+            {deleteErr && (
+              <p className="text-xs text-red-500 text-center mb-4 bg-red-50 rounded-lg px-3 py-2">{deleteErr}</p>
+            )}
             <div className="flex gap-3">
               <button
-                onClick={() => setShowDeleteConfirm(false)}
+                onClick={() => { setShowDeleteConfirm(false); setDeleteErr('') }}
                 disabled={deleting}
                 className="flex-1 h-10 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors duration-200 disabled:opacity-50"
               >
@@ -1394,7 +1797,7 @@ function BrowseCoursesSection({ token, currentUserId }: { token: string; current
               <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
               </svg>
-              {selected.sections.length} section{selected.sections.length !== 1 ? 's' : ''}
+              {selected.sections_count} section{selected.sections_count !== 1 ? 's' : ''}
             </span>
             <span className="flex items-center gap-1.5">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
@@ -1459,10 +1862,25 @@ function BrowseCoursesSection({ token, currentUserId }: { token: string; current
                     </span>
                     <span className="font-semibold text-slate-900">{section.title}</span>
                   </div>
-                  <span className="text-xs text-slate-400 bg-slate-50 px-2.5 py-1 rounded-full">{section.materials.length} item{section.materials.length !== 1 ? 's' : ''}</span>
+                  <span className="text-xs text-slate-400 bg-slate-50 px-2.5 py-1 rounded-full">
+                    {section.subsections.length + section.materials.length} item{(section.subsections.length + section.materials.length) !== 1 ? 's' : ''}
+                  </span>
                 </div>
-                {section.materials.length > 0 && (
+                {(section.subsections.length > 0 || section.materials.length > 0) && (
                   <div className="divide-y divide-slate-50">
+                    {section.subsections.map(sub => (
+                      <div key={sub.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50/50 transition-colors duration-200">
+                        <span className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
+                          <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                          </svg>
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-slate-900 truncate">{sub.title}</div>
+                          <div className="text-xs text-slate-400">Lesson</div>
+                        </div>
+                      </div>
+                    ))}
                     {section.materials.map(m => (
                       <div key={m.id}>
                         <div className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50/50 transition-colors duration-200">
@@ -1573,7 +1991,7 @@ function BrowseCoursesSection({ token, currentUserId }: { token: string; current
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 stagger-children">
           {filtered.map(c => (
             <div key={c.id}
-              onClick={() => setSelected(c)}
+              onClick={async () => { const full = await getCourseDetail(c.id); setSelected(full) }}
               className="group bg-white rounded-2xl border border-slate-200/80 overflow-hidden cursor-pointer shadow-[0_2px_12px_rgba(0,0,0,0.04)] hover:shadow-[0_12px_40px_rgba(0,0,0,0.12)] hover:border-slate-300 hover:-translate-y-1 transition-all duration-300">
               {c.thumbnail ? (
                 <div className="h-32 overflow-hidden">
@@ -1608,7 +2026,7 @@ function BrowseCoursesSection({ token, currentUserId }: { token: string; current
                 )}
                 <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-100 text-xs">
                   <div className="flex items-center gap-3 text-slate-400 min-w-0">
-                    <span>{c.sections.length} section{c.sections.length !== 1 ? 's' : ''}</span>
+                    <span>{c.sections_count} section{c.sections_count !== 1 ? 's' : ''}</span>
                     <span>·</span>
                     <span>{c.enrolled_count} student{c.enrolled_count !== 1 ? 's' : ''}</span>
                   </div>
@@ -1713,7 +2131,7 @@ function CoursesSection({ token }: { token: string }) {
           {courses.map((c, i) => (
             <div
               key={c.id}
-              onClick={() => setSelected(c)}
+              onClick={async () => { const full = await getCourseDetail(c.id); setSelected(full) }}
               className={`group flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-slate-50 transition-all duration-200 ${i !== courses.length - 1 ? 'border-b border-slate-100' : ''}`}
             >
               {/* Course icon */}
@@ -1726,7 +2144,7 @@ function CoursesSection({ token }: { token: string }) {
               <div className="flex-1 min-w-0">
                 <div className="font-semibold text-slate-900 truncate group-hover:text-[#FF5533] transition-colors duration-200">{c.title}</div>
                 <div className="text-xs text-slate-400 mt-0.5">
-                  {c.sections.length} section{c.sections.length !== 1 ? 's' : ''} · {c.enrolled_count} student{c.enrolled_count !== 1 ? 's' : ''}
+                  {c.sections_count} section{c.sections_count !== 1 ? 's' : ''} · {c.enrolled_count} student{c.enrolled_count !== 1 ? 's' : ''}
                 </div>
               </div>
               
@@ -1766,6 +2184,7 @@ function IncomingChatRequestsSection({ token, currentUserId }: { token: string; 
   const [autoRefuseLoading, setAutoRefuseLoading] = useState(false)
   const [reviewingId, setReviewingId] = useState<string | null>(null)
   const [openRequest, setOpenRequest] = useState<ChatRequestOut | null>(null)
+  const [err, setErr] = useState('')
 
   const load = () => {
     setLoading(true)
@@ -1781,17 +2200,23 @@ function IncomingChatRequestsSection({ token, currentUserId }: { token: string; 
 
   const handleAutoRefuseToggle = async () => {
     setAutoRefuseLoading(true)
+    setErr('')
     try {
       const { auto_refuse } = await setAutoRefuse(token, !autoRefuse)
       setAutoRefuseState(auto_refuse)
+    } catch (e: any) {
+      setErr(e.message || 'Failed to update setting')
     } finally { setAutoRefuseLoading(false) }
   }
 
   const handleReview = async (requestId: string, action: 'accept' | 'refuse') => {
     setReviewingId(requestId)
+    setErr('')
     try {
       const updated = await reviewChatRequest(token, requestId, action)
       setRequests(prev => prev.map(r => r.id === updated.id ? updated : r))
+    } catch (e: any) {
+      setErr(e.message || 'Failed to update request')
     } finally { setReviewingId(null) }
   }
 
@@ -1824,6 +2249,12 @@ function IncomingChatRequestsSection({ token, currentUserId }: { token: string; 
 
   return (
     <div className="max-w-[800px] animate-fadeIn">
+      {err && (
+        <div className="flex items-center gap-3 p-3 mb-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600">
+          <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" /></svg>
+          {err}
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
         <div>
@@ -2207,7 +2638,7 @@ function MyLearningSection({ token }: { token: string }) {
 
                 <div className="text-right shrink-0 flex items-center gap-3">
                   <div>
-                    <div className="text-xs text-slate-400">{c.sections.length} section{c.sections.length !== 1 ? 's' : ''}</div>
+                    <div className="text-xs text-slate-400">{c.sections_count} section{c.sections_count !== 1 ? 's' : ''}</div>
                     <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 mt-0.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                       Active
@@ -2249,12 +2680,556 @@ function MyLearningSection({ token }: { token: string }) {
   )
 }
 
+/* ── Announcements Section ── */
+function AnnouncementsSection({ token, universityName }: { token: string; universityName: string }) {
+  const [items, setItems] = useState<AnnouncementOut[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    getMyAnnouncements(token)
+      .then(setItems)
+      .finally(() => setLoading(false))
+  }, [token])
+
+  return (
+    <div className="animate-fadeIn">
+      <div className="mb-6">
+        <p className="text-[0.7rem] font-bold tracking-[0.12em] uppercase text-[#FF5533] mb-1">University</p>
+        <h1 className="text-[1.75rem] font-black tracking-[-0.03em] text-[#0C0C0F]">Announcements</h1>
+        {universityName && (
+          <p className="text-[0.85rem] text-[#94A3B8] mt-1">From {universityName}</p>
+        )}
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-slate-400 py-12 text-center">Loading…</p>
+      ) : items.length === 0 ? (
+        <div className="text-center py-16 bg-white rounded-2xl border border-dashed border-slate-200">
+          <div className="w-12 h-12 rounded-2xl bg-orange-50 flex items-center justify-center mx-auto mb-3">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FF5533" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 11l19-9-9 19-2-8-8-2z" />
+            </svg>
+          </div>
+          <p className="text-sm font-semibold text-slate-900 mb-1">No announcements yet</p>
+          <p className="text-xs text-slate-400">Your university hasn't posted anything yet</p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {items.map(a => (
+            <div key={a.id} className="bg-white rounded-xl border border-slate-200 px-5 py-4 shadow-sm">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-orange-100 text-orange-500 flex items-center justify-center shrink-0 mt-0.5">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 11l19-9-9 19-2-8-8-2z" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-[0.85rem] font-semibold text-[#0C0C0F] leading-snug">{a.title}</p>
+                    <span className="text-[0.65rem] text-slate-400 shrink-0 mt-0.5">
+                      {new Date(a.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <p className="text-[0.8rem] text-slate-500 mt-1.5 leading-relaxed whitespace-pre-wrap">{a.body}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── Analytics helpers ── */
+function StarRow({ value, size = 14 }: { value: number; size?: number }) {
+  const full = Math.floor(value)
+  const hasHalf = value - full >= 0.25 && value - full < 0.75
+  const fullStars = hasHalf ? full : Math.round(value)
+  const stars = Array.from({ length: 5 }, (_, i) => {
+    if (i < full) return 'full'
+    if (i === full && hasHalf) return 'half'
+    if (i < fullStars) return 'full'
+    return 'empty'
+  })
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      {stars.map((kind, i) => (
+        <svg key={i} width={size} height={size} viewBox="0 0 24 24" fill={kind === 'empty' ? 'none' : '#F59E0B'} stroke="#F59E0B" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          {kind === 'half' ? (
+            <>
+              <defs>
+                <linearGradient id={`half-${i}-${size}`}>
+                  <stop offset="50%" stopColor="#F59E0B" />
+                  <stop offset="50%" stopColor="transparent" />
+                </linearGradient>
+              </defs>
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill={`url(#half-${i}-${size})`} />
+            </>
+          ) : (
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+          )}
+        </svg>
+      ))}
+    </span>
+  )
+}
+
+function MiniStat({ label, value, hint, color, accent }: { label: string; value: string | number; hint?: string; color?: string; accent?: string }) {
+  return (
+    <div className="bg-white border border-[#E5E7EB] rounded-2xl px-5 py-4 shadow-[0_4px_20px_rgba(12,12,15,0.04)] relative overflow-hidden">
+      {accent && <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: accent }} />}
+      <p className="text-[0.65rem] font-bold text-[#94A3B8] uppercase tracking-[0.08em] mb-2">{label}</p>
+      <p className="text-[1.7rem] font-black text-[#0C0C0F] leading-none mb-1" style={color ? { color } : undefined}>{value}</p>
+      {hint && <p className="text-[0.7rem] font-semibold text-[#94A3B8]">{hint}</p>}
+    </div>
+  )
+}
+
+function TrendChart({ trend }: { trend: import('../api/course').AnalyticsTrendPoint[] }) {
+  const W = 720
+  const H = 180
+  const PAD_X = 12
+  const PAD_TOP = 16
+  const PAD_BOTTOM = 24
+  const max = Math.max(1, ...trend.map(t => Math.max(t.enrollments, t.completions)))
+  const stepX = trend.length > 1 ? (W - PAD_X * 2) / (trend.length - 1) : 0
+  const yOf = (v: number) => PAD_TOP + (1 - v / max) * (H - PAD_TOP - PAD_BOTTOM)
+  const xOf = (i: number) => PAD_X + i * stepX
+  const enrollPath = trend.map((t, i) => `${i === 0 ? 'M' : 'L'}${xOf(i).toFixed(1)},${yOf(t.enrollments).toFixed(1)}`).join(' ')
+  const enrollArea = `${enrollPath} L${xOf(trend.length - 1).toFixed(1)},${(H - PAD_BOTTOM).toFixed(1)} L${xOf(0).toFixed(1)},${(H - PAD_BOTTOM).toFixed(1)} Z`
+  const completePath = trend.map((t, i) => `${i === 0 ? 'M' : 'L'}${xOf(i).toFixed(1)},${yOf(t.completions).toFixed(1)}`).join(' ')
+
+  const labelEvery = Math.max(1, Math.floor(trend.length / 6))
+  const fmtDay = (s: string) => {
+    const d = new Date(s)
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  }
+
+  return (
+    <div className="w-full overflow-x-auto">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-[180px] min-w-[480px]">
+        <defs>
+          <linearGradient id="enroll-area" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#FF5533" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="#FF5533" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {/* horizontal gridlines */}
+        {[0.25, 0.5, 0.75, 1].map(f => (
+          <line key={f} x1={PAD_X} x2={W - PAD_X} y1={PAD_TOP + (H - PAD_TOP - PAD_BOTTOM) * f} y2={PAD_TOP + (H - PAD_TOP - PAD_BOTTOM) * f} stroke="#F1F3F5" strokeWidth="1" />
+        ))}
+        <path d={enrollArea} fill="url(#enroll-area)" />
+        <path d={enrollPath} fill="none" stroke="#FF5533" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={completePath} fill="none" stroke="#10B981" strokeWidth="2" strokeDasharray="4 4" strokeLinejoin="round" strokeLinecap="round" />
+        {/* X labels */}
+        {trend.map((t, i) => (i % labelEvery === 0 || i === trend.length - 1) && (
+          <text key={t.date} x={xOf(i)} y={H - 6} textAnchor="middle" fontSize="9" fill="#94A3B8" fontWeight="600">{fmtDay(t.date)}</text>
+        ))}
+      </svg>
+    </div>
+  )
+}
+
+function RatingDistributionBars({ distribution, total }: { distribution: Record<string, number>; total: number }) {
+  return (
+    <div className="space-y-1.5">
+      {[5, 4, 3, 2, 1].map(star => {
+        const count = Number(distribution?.[star] ?? 0)
+        const pct = total > 0 ? (count / total) * 100 : 0
+        return (
+          <div key={star} className="flex items-center gap-2">
+            <span className="text-[0.7rem] font-bold text-[#0C0C0F] w-3">{star}</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="#F59E0B" stroke="#F59E0B" strokeWidth="1.6" strokeLinejoin="round">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
+            <div className="flex-1 h-1.5 bg-[#F1F3F5] rounded-full overflow-hidden">
+              <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: '#F59E0B' }} />
+            </div>
+            <span className="text-[0.66rem] font-bold text-[#94A3B8] w-7 text-right tabular-nums">{count}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime()
+  const diff = Date.now() - then
+  const m = Math.floor(diff / 60000)
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.floor(h / 24)
+  if (d < 30) return `${d}d ago`
+  const mo = Math.floor(d / 30)
+  if (mo < 12) return `${mo}mo ago`
+  return `${Math.floor(mo / 12)}y ago`
+}
+
+/* ── Analytics Section ── */
+function AnalyticsSection({ token }: { token: string }) {
+  const [data, setData] = useState<import('../api/course').CourseAnalyticsOut | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [sortBy, setSortBy] = useState<'recent' | 'enrolled' | 'rating' | 'completion'>('recent')
+  const [filter, setFilter] = useState<'all' | 'published' | 'draft'>('all')
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    import('../api/course').then(({ getCourseAnalytics }) => {
+      getCourseAnalytics(token).then(setData).catch(() => {}).finally(() => setLoading(false))
+    })
+  }, [token])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="w-6 h-6 border-2 border-[#FF5533] border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  if (!data || data.courses.length === 0) {
+    return (
+      <div className="bg-white border border-[#E5E7EB] rounded-2xl px-8 py-16 text-center shadow-[0_4px_20px_rgba(12,12,15,0.04)]">
+        <div className="w-14 h-14 mx-auto mb-4 bg-[#F1F3F5] rounded-2xl flex items-center justify-center">
+          <TrendIcon />
+        </div>
+        <p className="text-[0.9rem] font-semibold text-[#0C0C0F] mb-1">No courses yet</p>
+        <p className="text-[0.82rem] text-[#94A3B8]">Create and publish courses to see analytics here.</p>
+      </div>
+    )
+  }
+
+  const filtered = data.courses.filter(c =>
+    filter === 'all' ? true : filter === 'published' ? c.is_published : !c.is_published
+  )
+  const sorted = [...filtered].sort((a, b) => {
+    if (sortBy === 'enrolled') return b.enrolled_count - a.enrolled_count
+    if (sortBy === 'rating') return b.avg_rating - a.avg_rating || b.rating_count - a.rating_count
+    if (sortBy === 'completion') return b.completion_rate - a.completion_rate
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  })
+
+  const toggleExpanded = (id: string) => {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="flex items-end justify-between gap-4 mb-6">
+        <div>
+          <h2 className="text-[1.5rem] font-black text-[#0C0C0F] tracking-tight leading-tight">Analytics</h2>
+          <p className="text-[0.82rem] text-[#94A3B8] mt-0.5">Performance overview across {data.total_courses} course{data.total_courses === 1 ? '' : 's'} · last 30 days</p>
+        </div>
+        <div className="hidden sm:flex items-center gap-2 text-[0.7rem] font-bold text-[#94A3B8]">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-2.5 h-0.5 bg-[#FF5533]" /> Enrollments
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-2.5 h-0.5 bg-[#10B981] [border-top:1px_dashed_#10B981]" style={{ borderTop: '1.5px dashed #10B981', background: 'transparent' }} /> Completions
+          </span>
+        </div>
+      </div>
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <MiniStat label="Total students" value={data.total_enrolled} hint={`+${data.enrollments_last_7d} this week`} accent="#3B82F6" />
+        <MiniStat label="Completion rate" value={`${data.overall_completion_rate}%`} hint={`${data.total_completed} completed`} accent="#10B981" />
+        <MiniStat
+          label="Average rating"
+          value={data.total_reviews > 0 ? data.overall_avg_rating.toFixed(1) : '—'}
+          hint={`${data.total_reviews} review${data.total_reviews === 1 ? '' : 's'}`}
+          accent="#F59E0B"
+        />
+        <MiniStat label="Live courses" value={`${data.total_published}/${data.total_courses}`} hint={`${data.total_drafts} draft${data.total_drafts === 1 ? '' : 's'}`} accent="#8B5CF6" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        {/* Trend chart */}
+        <div className="lg:col-span-2 bg-white border border-[#E5E7EB] rounded-2xl px-5 py-5 shadow-[0_4px_20px_rgba(12,12,15,0.04)]">
+          <div className="flex items-start justify-between mb-3">
+            <div>
+              <p className="text-[0.7rem] font-bold text-[#94A3B8] uppercase tracking-[0.08em]">Enrollment trend</p>
+              <p className="text-[1.1rem] font-black text-[#0C0C0F] leading-tight">Last 30 days</p>
+            </div>
+            <div className="text-right">
+              <p className="text-[1.2rem] font-black text-[#FF5533] leading-none">+{data.enrollments_last_30d}</p>
+              <p className="text-[0.66rem] font-semibold text-[#94A3B8] uppercase tracking-wide mt-0.5">enrollments</p>
+            </div>
+          </div>
+          <TrendChart trend={data.trend} />
+        </div>
+
+        {/* Overall rating */}
+        <div className="bg-white border border-[#E5E7EB] rounded-2xl px-5 py-5 shadow-[0_4px_20px_rgba(12,12,15,0.04)]">
+          <p className="text-[0.7rem] font-bold text-[#94A3B8] uppercase tracking-[0.08em] mb-2">Overall rating</p>
+          {data.total_reviews > 0 ? (
+            <>
+              <div className="flex items-baseline gap-2 mb-1">
+                <span className="text-[2.2rem] font-black text-[#0C0C0F] leading-none">{data.overall_avg_rating.toFixed(1)}</span>
+                <span className="text-[0.78rem] font-semibold text-[#94A3B8]">/ 5.0</span>
+              </div>
+              <div className="mb-3"><StarRow value={data.overall_avg_rating} size={16} /></div>
+              <p className="text-[0.7rem] font-semibold text-[#94A3B8] mb-3">Based on {data.total_reviews} review{data.total_reviews === 1 ? '' : 's'}</p>
+              <RatingDistributionBars distribution={data.overall_rating_distribution} total={data.total_reviews} />
+            </>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-6 text-center">
+              <div className="w-10 h-10 mb-2 rounded-full bg-[#F1F3F5] flex items-center justify-center"><StarRow value={0} size={14} /></div>
+              <p className="text-[0.78rem] font-semibold text-[#0C0C0F]">No reviews yet</p>
+              <p className="text-[0.7rem] text-[#94A3B8] mt-0.5">Reviews appear once students complete a course.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Top performers */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+        <div className="bg-white border border-[#E5E7EB] rounded-2xl px-5 py-5 shadow-[0_4px_20px_rgba(12,12,15,0.04)]">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[0.78rem] font-black text-[#0C0C0F]">Top by enrollment</p>
+            <span className="text-[0.6rem] font-bold uppercase tracking-wider text-[#3B82F6] bg-blue-50 px-2 py-0.5 rounded-full">Most popular</span>
+          </div>
+          <div className="space-y-2.5">
+            {data.top_courses_by_enrollment.length === 0 ? (
+              <p className="text-[0.78rem] text-[#94A3B8]">No data yet.</p>
+            ) : data.top_courses_by_enrollment.map((c, i) => (
+              <div key={c.course_id} className="flex items-center gap-3">
+                <div className="w-7 h-7 rounded-lg bg-[#F1F3F5] flex items-center justify-center text-[0.78rem] font-black text-[#0C0C0F]">{i + 1}</div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[0.82rem] font-bold text-[#0C0C0F] truncate">{c.course_title}</p>
+                  <p className="text-[0.66rem] text-[#94A3B8]">{c.completion_rate}% completion</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-[0.95rem] font-black text-[#0C0C0F] leading-none">{c.enrolled_count}</p>
+                  <p className="text-[0.6rem] font-semibold text-[#94A3B8] uppercase tracking-wide">students</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white border border-[#E5E7EB] rounded-2xl px-5 py-5 shadow-[0_4px_20px_rgba(12,12,15,0.04)]">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[0.78rem] font-black text-[#0C0C0F]">Top by rating</p>
+            <span className="text-[0.6rem] font-bold uppercase tracking-wider text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">Highest rated</span>
+          </div>
+          <div className="space-y-2.5">
+            {data.top_courses_by_rating.length === 0 ? (
+              <p className="text-[0.78rem] text-[#94A3B8]">No reviews yet.</p>
+            ) : data.top_courses_by_rating.map((c, i) => (
+              <div key={c.course_id} className="flex items-center gap-3">
+                <div className="w-7 h-7 rounded-lg bg-[#FFF7E6] flex items-center justify-center text-[0.78rem] font-black text-amber-700">{i + 1}</div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[0.82rem] font-bold text-[#0C0C0F] truncate">{c.course_title}</p>
+                  <div className="flex items-center gap-1.5">
+                    <StarRow value={c.avg_rating} size={11} />
+                    <span className="text-[0.66rem] text-[#94A3B8]">({c.rating_count})</span>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-[0.95rem] font-black text-amber-600 leading-none">{c.avg_rating.toFixed(1)}</p>
+                  <p className="text-[0.6rem] font-semibold text-[#94A3B8] uppercase tracking-wide">avg</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Per-course breakdown */}
+      <div className="flex items-end justify-between gap-3 mb-3 flex-wrap">
+        <h3 className="text-[1.05rem] font-black text-[#0C0C0F]">Course performance</h3>
+        <div className="flex items-center gap-2">
+          <div className="flex bg-[#F1F3F5] rounded-lg p-0.5">
+            {(['all', 'published', 'draft'] as const).map(f => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`px-3 h-7 rounded-md text-[0.7rem] font-bold capitalize transition ${filter === f ? 'bg-white text-[#0C0C0F] shadow-sm' : 'text-[#94A3B8] hover:text-[#0C0C0F]'}`}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value as typeof sortBy)}
+            className="h-9 px-3 pr-8 border border-[#E5E7EB] rounded-lg bg-white text-[0.74rem] font-bold text-[#0C0C0F] focus:outline-none focus:ring-2 focus:ring-[#0C0C0F]/10"
+          >
+            <option value="recent">Sort: Newest</option>
+            <option value="enrolled">Sort: Most enrolled</option>
+            <option value="rating">Sort: Highest rated</option>
+            <option value="completion">Sort: Highest completion</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {sorted.length === 0 ? (
+          <div className="bg-white border border-[#E5E7EB] rounded-2xl px-6 py-10 text-center">
+            <p className="text-[0.82rem] text-[#94A3B8]">No courses match this filter.</p>
+          </div>
+        ) : sorted.map(course => {
+          const isOpen = expanded.has(course.course_id)
+          const completionColor = course.completion_rate >= 75 ? '#10B981' : course.completion_rate >= 40 ? '#FF5533' : '#3B82F6'
+          return (
+            <div key={course.course_id} className="bg-white border border-[#E5E7EB] rounded-2xl shadow-[0_4px_20px_rgba(12,12,15,0.04)] overflow-hidden">
+              <div className="px-5 py-5">
+                {/* Header row */}
+                <div className="flex items-start gap-4 mb-4">
+                  <div className="w-14 h-14 shrink-0 rounded-xl bg-[#F1F3F5] overflow-hidden border border-[#E5E7EB]">
+                    {course.thumbnail ? (
+                      <img src={`http://localhost:8000${course.thumbnail}`} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-[#94A3B8]"><BookIcon /></div>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <p className="text-[0.95rem] font-black text-[#0C0C0F] truncate">{course.course_title}</p>
+                      {course.is_published ? (
+                        <span className="shrink-0 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[0.6rem] font-bold uppercase tracking-wide border border-emerald-200">Live</span>
+                      ) : (
+                        <span className="shrink-0 px-2 py-0.5 rounded-full bg-[#F1F3F5] text-[#94A3B8] text-[0.6rem] font-bold uppercase tracking-wide">Draft</span>
+                      )}
+                      {course.category_name && (
+                        <span className="shrink-0 px-2 py-0.5 rounded-full bg-[#F8F9FA] text-[#0C0C0F] text-[0.6rem] font-bold uppercase tracking-wide border border-[#E5E7EB]">{course.category_name}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 text-[0.72rem] text-[#94A3B8] flex-wrap">
+                      <span className="inline-flex items-center gap-1">
+                        <StarRow value={course.avg_rating} size={11} />
+                        <span className="font-bold text-[#0C0C0F]">{course.rating_count > 0 ? course.avg_rating.toFixed(1) : '—'}</span>
+                        <span>({course.rating_count})</span>
+                      </span>
+                      <span>·</span>
+                      <span>{course.total_lessons} lesson{course.total_lessons === 1 ? '' : 's'}</span>
+                      {course.enrollments_last_7d > 0 && <><span>·</span><span className="text-emerald-600 font-bold">+{course.enrollments_last_7d} this week</span></>}
+                      {course.last_enrollment_at && <><span>·</span><span>last enroll {relativeTime(course.last_enrollment_at)}</span></>}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => toggleExpanded(course.course_id)}
+                    className="shrink-0 h-8 px-3 rounded-lg border border-[#E5E7EB] text-[0.72rem] font-bold text-[#0C0C0F] hover:bg-[#F8F9FA] transition"
+                  >
+                    {isOpen ? 'Hide' : 'Reviews'}
+                  </button>
+                </div>
+
+                {/* Stats grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4">
+                  <div className="bg-[#F8F9FA] rounded-xl px-3 py-2.5">
+                    <p className="text-[0.6rem] font-bold text-[#94A3B8] uppercase tracking-wide mb-1">Enrolled</p>
+                    <p className="text-[1.05rem] font-black text-[#3B82F6] leading-none">{course.enrolled_count}</p>
+                  </div>
+                  <div className="bg-[#F8F9FA] rounded-xl px-3 py-2.5">
+                    <p className="text-[0.6rem] font-bold text-[#94A3B8] uppercase tracking-wide mb-1">Completed</p>
+                    <p className="text-[1.05rem] font-black text-[#10B981] leading-none">{course.completed_count}</p>
+                  </div>
+                  <div className="bg-[#F8F9FA] rounded-xl px-3 py-2.5">
+                    <p className="text-[0.6rem] font-bold text-[#94A3B8] uppercase tracking-wide mb-1">In progress</p>
+                    <p className="text-[1.05rem] font-black text-[#FF5533] leading-none">{course.in_progress_count}</p>
+                  </div>
+                  <div className="bg-[#F8F9FA] rounded-xl px-3 py-2.5">
+                    <p className="text-[0.6rem] font-bold text-[#94A3B8] uppercase tracking-wide mb-1">Avg progress</p>
+                    <p className="text-[1.05rem] font-black text-[#8B5CF6] leading-none">{course.avg_progress}%</p>
+                  </div>
+                  <div className="bg-[#F8F9FA] rounded-xl px-3 py-2.5">
+                    <p className="text-[0.6rem] font-bold text-[#94A3B8] uppercase tracking-wide mb-1">Last 30d</p>
+                    <p className="text-[1.05rem] font-black text-[#0C0C0F] leading-none">+{course.enrollments_last_30d}</p>
+                  </div>
+                </div>
+
+                {/* Completion bar */}
+                <div>
+                  <div className="flex items-center justify-between text-[0.68rem] mb-1.5">
+                    <span className="text-[#94A3B8] font-semibold">Completion rate</span>
+                    <span className="font-bold text-[#0C0C0F]">{course.completed_count}/{course.enrolled_count} · {course.completion_rate}%</span>
+                  </div>
+                  <div className="h-2 bg-[#F1F3F5] rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-700" style={{ width: `${course.completion_rate}%`, background: completionColor }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Expanded reviews panel */}
+              {isOpen && (
+                <div className="border-t border-[#E5E7EB] bg-[#FAFBFC] px-5 py-5">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                    {/* Rating summary */}
+                    <div>
+                      <p className="text-[0.7rem] font-bold text-[#94A3B8] uppercase tracking-[0.08em] mb-2">Rating breakdown</p>
+                      {course.rating_count > 0 ? (
+                        <>
+                          <div className="flex items-baseline gap-2 mb-1">
+                            <span className="text-[2rem] font-black text-[#0C0C0F] leading-none">{course.avg_rating.toFixed(1)}</span>
+                            <span className="text-[0.74rem] font-semibold text-[#94A3B8]">/ 5</span>
+                          </div>
+                          <div className="mb-2"><StarRow value={course.avg_rating} size={14} /></div>
+                          <p className="text-[0.7rem] font-semibold text-[#94A3B8] mb-3">{course.rating_count} review{course.rating_count === 1 ? '' : 's'}</p>
+                          <RatingDistributionBars distribution={course.rating_distribution} total={course.rating_count} />
+                        </>
+                      ) : (
+                        <p className="text-[0.78rem] text-[#94A3B8]">No reviews yet for this course.</p>
+                      )}
+                    </div>
+
+                    {/* Recent reviews */}
+                    <div className="md:col-span-2">
+                      <p className="text-[0.7rem] font-bold text-[#94A3B8] uppercase tracking-[0.08em] mb-2">Recent reviews</p>
+                      {course.recent_reviews.length === 0 ? (
+                        <div className="bg-white border border-dashed border-[#E5E7EB] rounded-xl px-4 py-6 text-center">
+                          <p className="text-[0.78rem] text-[#94A3B8]">Once students complete the course they can leave a review.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2.5 max-h-[320px] overflow-y-auto pr-1">
+                          {course.recent_reviews.map((r, i) => (
+                            <div key={i} className="bg-white border border-[#E5E7EB] rounded-xl px-3.5 py-3">
+                              <div className="flex items-center justify-between gap-2 mb-1">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <div className="w-7 h-7 shrink-0 rounded-full bg-gradient-to-br from-[#FF5533] to-[#FF8B6B] text-white flex items-center justify-center text-[0.68rem] font-black">
+                                    {(r.user_name || 'U').slice(0, 1).toUpperCase()}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-[0.78rem] font-bold text-[#0C0C0F] truncate">{r.user_name}</p>
+                                    <p className="text-[0.62rem] font-semibold text-[#94A3B8]">{relativeTime(r.created_at)}</p>
+                                  </div>
+                                </div>
+                                <StarRow value={r.rating} size={12} />
+                              </div>
+                              {r.comment && <p className="text-[0.78rem] text-[#0C0C0F] leading-relaxed mt-1.5">{r.comment}</p>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 /* ── Main Dashboard ── */
 export default function ProfessorDashboard() {
   const { user, token } = useAuth()
   const [nav, setNav] = useState('home')
-  // Track which sections have been visited so they mount once and stay alive
   const [mounted, setMounted] = useState<Set<string>>(() => new Set(['home']))
+  const [homeStats, setHomeStats] = useState({ courses: 0, students: 0, published: 0 })
   const firstName = user?.full_name?.split(' ')[0] || ''
 
   useEffect(() => {
@@ -2266,10 +3241,23 @@ export default function ProfessorDashboard() {
     })
   }, [nav])
 
-  const knownNavIds = new Set(['home', 'courses', 'my-learning', 'my-courses', 'students', 'chat', 'messages', 'find-friends'])
+  useEffect(() => {
+    if (!token) return
+    getMyCourses(token).then(courses => {
+      const published = courses.filter(c => c.is_published).length
+      const students = courses.reduce((s, c) => s + c.enrolled_count, 0)
+      setHomeStats({ courses: courses.length, students, published })
+    }).catch(() => {})
+  }, [token])
+
+  const navItems = user?.university_id
+    ? [...BASE_NAV.slice(0, -1), ANNOUNCEMENTS_NAV_ITEM, BASE_NAV[BASE_NAV.length - 1]]
+    : BASE_NAV
+
+  const knownNavIds = new Set(['home', 'courses', 'my-learning', 'my-courses', 'students', 'chat', 'messages', 'find-friends', 'announcements', 'analytics'])
 
   return (
-    <DashboardLayout navItems={NAV} activeNav={nav} onNavChange={setNav} roleLabel="Professor">
+    <DashboardLayout navItems={navItems} activeNav={nav} onNavChange={setNav} roleLabel="Professor">
 
       {/* ── Browse Courses ── */}
       <div className={nav !== 'courses' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
@@ -2311,11 +3299,21 @@ export default function ProfessorDashboard() {
         )}
       </div>
 
+      {/* ── Announcements ── */}
+      <div className={nav !== 'announcements' ? 'hidden' : 'max-w-[700px] mx-auto px-6 md:px-10 py-8'}>
+        {mounted.has('announcements') && <AnnouncementsSection token={token!} universityName={user?.university_name ?? ''} />}
+      </div>
+
+      {/* ── Analytics ── */}
+      <div className={nav !== 'analytics' ? 'hidden' : 'max-w-[1200px] mx-auto px-6 md:px-10 py-8'}>
+        {mounted.has('analytics') && <AnalyticsSection token={token!} />}
+      </div>
+
       {/* ── Coming-soon sections ── */}
       {!knownNavIds.has(nav) && (
         <div className="flex-1 flex items-center justify-center min-h-[60vh]">
           <div className="text-center">
-            <h2 className="text-[1.1rem] font-bold text-[#0C0C0F]">{NAV.find(n => n.id === nav)?.label}</h2>
+            <h2 className="text-[1.1rem] font-bold text-[#0C0C0F]">{navItems.find(n => n.id === nav)?.label}</h2>
             <p className="text-[0.82rem] text-[#94A3B8] mt-1">Coming soon</p>
           </div>
         </div>
@@ -2376,9 +3374,9 @@ export default function ProfessorDashboard() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {[
-                { label: 'Active students', value: '1.2k' },
-                { label: 'Live courses', value: '12' },
-                { label: 'Avg rating', value: '4.8' },
+                { label: 'Enrolled students', value: String(homeStats.students) },
+                { label: 'My courses', value: String(homeStats.courses) },
+                { label: 'Published', value: String(homeStats.published) },
               ].map(s => (
                 <div key={s.label} className="rounded-xl bg-white/10 border border-white/15 backdrop-blur px-4 py-3 shadow-inner flex items-center justify-between">
                   <div>

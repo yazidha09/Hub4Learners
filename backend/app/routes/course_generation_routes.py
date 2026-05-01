@@ -1,15 +1,18 @@
 import asyncio
 import uuid
 from datetime import datetime
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.controller import course_generation_controller as ctrl
 from app.database import get_db
-from app.models.course_material import CourseMaterial
 from app.models.course_section import CourseSection
+from app.models.course_subsection import CourseSubsection
 from app.models.courses import Course
+from app.models.lesson_block import LessonBlock
 from app.schemas.course_generation import (
     JobStatusResponse,
     QuizResponse,
@@ -23,6 +26,10 @@ from app.utils.security import get_current_user, require_role
 router = APIRouter(prefix="/course-gen", tags=["course-generation"])
 
 _MAX_PDF_BYTES = 20 * 1024 * 1024   # 20 MB hard cap
+
+
+class ImportOverrideBody(BaseModel):
+    result: Optional[Dict[str, Any]] = None
 _VALID_DIFFICULTIES = {"beginner", "intermediate", "advanced"}
 
 
@@ -180,6 +187,7 @@ async def get_subsection_quiz(
 def import_into_course(
     job_id: str,
     course_id: str,
+    body: Optional[ImportOverrideBody] = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_role("professor")),
 ):
@@ -189,6 +197,9 @@ def import_into_course(
 
     Each section in the generated JSON → CourseSection
     Each subsection                    → CourseMaterial (type='lesson', content_text=HTML)
+
+    Optionally accepts a `result` body to override the stored job result
+    (allows the professor to import with their edited content).
     """
     _assert_valid_uuid(job_id)
     _assert_valid_uuid(course_id)
@@ -206,7 +217,8 @@ def import_into_course(
     if str(course.professor_id) != current_user["sub"]:
         raise HTTPException(status_code=403, detail="You do not own this course")
 
-    generated = job.result
+    # Use professor's edited result if provided, otherwise fall back to stored result
+    generated = (body.result if body and body.result else None) or job.result
     if not generated or "sections" not in generated:
         raise HTTPException(status_code=400, detail="Job result has no sections")
 
@@ -219,7 +231,7 @@ def import_into_course(
     section_offset = len(existing_sections)
 
     created_sections = 0
-    created_materials = 0
+    created_lessons = 0
 
     for s_i, gen_section in enumerate(generated["sections"]):
         section = CourseSection(
@@ -228,19 +240,29 @@ def import_into_course(
             order_index=section_offset + s_i,
         )
         db.add(section)
-        db.flush()   # get section.id without committing
+        db.flush()  # get section.id
 
         for ss_i, sub in enumerate(gen_section.get("subsections", [])):
-            material = CourseMaterial(
+            subsection = CourseSubsection(
                 section_id=section.id,
                 title=sub["title"],
-                type="lesson",
-                file_url="ai-generated",
-                content_text=sub.get("content", "<p>No content generated.</p>"),
                 order_index=ss_i,
             )
-            db.add(material)
-            created_materials += 1
+            db.add(subsection)
+            db.flush()  # get subsection.id
+
+            content = sub.get("content", "") or ""
+            if content and not content.strip().startswith("<"):
+                content = f"<p>{content}</p>"
+
+            block = LessonBlock(
+                subsection_id=subsection.id,
+                block_type="text",
+                content=content or "<p>No content generated.</p>",
+                order_index=0,
+            )
+            db.add(block)
+            created_lessons += 1
 
         created_sections += 1
 
@@ -250,7 +272,7 @@ def import_into_course(
         "detail": "Import successful",
         "course_id": course_id,
         "sections_created": created_sections,
-        "lessons_created": created_materials,
+        "lessons_created": created_lessons,
     }
 
 

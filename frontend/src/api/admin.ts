@@ -88,3 +88,29 @@ export function adminTogglePublish(token: string, courseId: string): Promise<Cou
 export function adminDeleteCourse(token: string, courseId: string): Promise<{ detail: string }> {
   return request<{ detail: string }>(`/admin/courses/${courseId}`, token, { method: 'DELETE' })
 }
+
+export interface AnnouncementOut {
+  id: string
+  university_id: string
+  created_by: string
+  title: string
+  body: string
+  recipient_count: number
+  created_at: string
+}
+
+export function listAnnouncements(token: string): Promise<AnnouncementOut[]> {
+  return request<AnnouncementOut[]>('/announcements', token)
+}
+
+export function createAnnouncement(token: string, title: string, body: string): Promise<AnnouncementOut> {
+  return request<AnnouncementOut>('/announcements', token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, body }),
+  })
+}
+
+export function getMyAnnouncements(token: string): Promise<AnnouncementOut[]> {
+  return request<AnnouncementOut[]>('/announcements/my', token)
+}

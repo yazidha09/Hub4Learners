@@ -22,6 +22,11 @@ from app.models.friendship import Friendship          # noqa: F401
 from app.models.friend_message import FriendMessage   # noqa: F401
 from app.models.notification import Notification      # noqa: F401
 from app.models.generated_course import GeneratedCourse  # noqa: F401
+from app.models.lesson_block import LessonBlock          # noqa: F401
+from app.models.course_subsection import CourseSubsection  # noqa: F401
+from app.models.announcement import Announcement            # noqa: F401
+from app.models.course_progress import CourseProgress      # noqa: F401
+from app.models.course_feedback import CourseFeedback      # noqa: F401
 from app.controller.category_controller import seed_categories
 from app.routes.auth_routes import router as auth_router
 from app.routes.course_routes import router as course_router
@@ -35,6 +40,7 @@ from app.routes.friend_routes import router as friend_router
 from app.routes.notification_routes import router as notification_router
 from app.routes.ws_routes import router as ws_router
 from app.routes.course_generation_routes import router as course_gen_router
+from app.routes.announcement_routes import router as announcement_router
 
 app = FastAPI()
 
@@ -190,6 +196,76 @@ def on_startup():
             """,
             "CREATE INDEX IF NOT EXISTS ix_generated_courses_user_id ON generated_courses(user_id)",
             "CREATE INDEX IF NOT EXISTS ix_generated_courses_status ON generated_courses(status)",
+            # ── Lesson blocks (block-based lesson builder) ────────────────────
+            """
+            CREATE TABLE IF NOT EXISTS lesson_blocks (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                section_id UUID REFERENCES course_sections(id) ON DELETE CASCADE,
+                block_type VARCHAR(20) NOT NULL,
+                content TEXT,
+                file_url TEXT,
+                caption VARCHAR(500),
+                order_index INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_lesson_blocks_section ON lesson_blocks(section_id)",
+            # ── Subsections (Section → Subsection → Blocks hierarchy) ─────────
+            """
+            CREATE TABLE IF NOT EXISTS course_subsections (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                section_id UUID NOT NULL REFERENCES course_sections(id) ON DELETE CASCADE,
+                title VARCHAR(255) NOT NULL,
+                order_index INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_course_subsections_section ON course_subsections(section_id)",
+            # Add subsection_id to lesson_blocks for new hierarchy
+            "ALTER TABLE lesson_blocks ADD COLUMN IF NOT EXISTS subsection_id UUID REFERENCES course_subsections(id) ON DELETE CASCADE",
+            "CREATE INDEX IF NOT EXISTS ix_lesson_blocks_subsection ON lesson_blocks(subsection_id)",
+            # Make section_id nullable on lesson_blocks (new blocks use subsection_id)
+            "ALTER TABLE lesson_blocks ALTER COLUMN section_id DROP NOT NULL",
+            # ── Announcements ─────────────────────────────────────────────────
+            """
+            CREATE TABLE IF NOT EXISTS announcements (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                university_id UUID NOT NULL REFERENCES universities(id) ON DELETE CASCADE,
+                created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                title VARCHAR(255) NOT NULL,
+                body TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_announcements_university ON announcements(university_id)",
+            # ── Course progress tracking ───────────────────────────────────────
+            """
+            CREATE TABLE IF NOT EXISTS course_progress (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                student_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+                subsection_id UUID REFERENCES course_subsections(id) ON DELETE CASCADE,
+                material_id UUID REFERENCES course_materials(id) ON DELETE CASCADE,
+                completed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_course_progress_student ON course_progress(student_id)",
+            "CREATE INDEX IF NOT EXISTS ix_course_progress_course ON course_progress(course_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_progress_subsection ON course_progress(student_id, subsection_id) WHERE subsection_id IS NOT NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_progress_material ON course_progress(student_id, material_id) WHERE material_id IS NOT NULL",
+            # ── Course feedback ───────────────────────────────────────────────
+            """
+            CREATE TABLE IF NOT EXISTS course_feedback (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+                comment TEXT,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (course_id, user_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_course_feedback_course ON course_feedback(course_id)",
         ]
         for sql in migrations:
             conn.execute(sa.text(sql))
@@ -214,6 +290,7 @@ app.include_router(ai_router,                prefix="/api")
 app.include_router(friend_router,            prefix="/api")
 app.include_router(notification_router,      prefix="/api")
 app.include_router(course_gen_router,        prefix="/api")
+app.include_router(announcement_router,      prefix="/api")
 app.include_router(ws_router)  # No /api prefix — WebSocket paths start with /ws
 
 

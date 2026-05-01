@@ -19,8 +19,9 @@ dependencies = [
     "python-dotenv==1.0.1",
     # File uploads
     "python-multipart==0.0.9",
-    # AI
+    # AI / RAG
     "google-generativeai>=0.8.0",
+    "pinecone>=3.0.0",
     "email-validator>=2.3.0",
     "pymupdf>=1.27.2.2",
 ]

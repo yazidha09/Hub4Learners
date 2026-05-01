@@ -12,6 +12,7 @@ export interface UserOut {
   role: string;
   is_verified: boolean;
   bio: string | null;
+  speciality: string | null;
   profile_image: string | null;
   university_id: string | null;
   region_id: string | null;
@@ -23,6 +24,7 @@ export interface UpdateProfileData {
   full_name?: string;
   email?: string;
   bio?: string;
+  speciality?: string;
   current_password?: string;
   new_password?: string;
   university_id?: string | null;  // "" or null to unlink

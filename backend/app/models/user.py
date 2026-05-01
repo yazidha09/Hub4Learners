@@ -15,6 +15,7 @@ class User(SQLModel, table=True):
     password_hash: str = Field(sa_column=Column(Text, nullable=False))
     role: str = Field(sa_column=Column(String(50), nullable=False, index=True))
     bio: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    speciality: Optional[str] = Field(default=None, sa_column=Column(String(255), nullable=True))
     profile_image: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
     is_active: bool = Field(default=True)
     is_verified: bool = Field(sa_column=Column(Boolean, nullable=False, server_default='true'), default=True)

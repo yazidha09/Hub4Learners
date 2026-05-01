@@ -11,6 +11,27 @@ export interface MaterialOut {
   created_at: string
 }
 
+export interface LessonBlockOut {
+  id: string
+  subsection_id?: string
+  section_id?: string
+  block_type: 'text' | 'image' | 'video'
+  content?: string
+  file_url?: string
+  caption?: string
+  order_index: number
+  created_at: string
+}
+
+export interface SubsectionOut {
+  id: string
+  section_id: string
+  title: string
+  order_index: number
+  created_at: string
+  blocks: LessonBlockOut[]
+}
+
 export interface GenerationJob {
   job_id: string
   status: 'processing' | 'completed' | 'failed'
@@ -40,6 +61,8 @@ export interface SectionOut {
   order_index: number
   created_at: string
   materials: MaterialOut[]
+  blocks: LessonBlockOut[]
+  subsections: SubsectionOut[]
 }
 
 export interface CourseOut {
@@ -56,7 +79,74 @@ export interface CourseOut {
   created_at: string
   updated_at: string
   sections: SectionOut[]
+  sections_count: number
   enrolled_count: number
+  enrollment_status?: string
+  progress_pct?: number
+}
+
+export interface CourseProgressOut {
+  course_id: string
+  completed_subsection_ids: string[]
+  completed_material_ids: string[]
+  total_items: number
+  completed_items: number
+  progress_pct: number
+}
+
+export interface AnalyticsReviewItem {
+  user_name: string
+  rating: number
+  comment?: string | null
+  created_at: string
+}
+
+export interface CourseAnalyticsItem {
+  course_id: string
+  course_title: string
+  thumbnail?: string | null
+  category_name?: string | null
+  is_published: boolean
+  created_at: string
+  enrolled_count: number
+  completed_count: number
+  in_progress_count: number
+  completion_rate: number
+  avg_progress: number
+  avg_rating: number
+  rating_count: number
+  rating_distribution: Record<string, number>
+  recent_reviews: AnalyticsReviewItem[]
+  enrollments_last_7d: number
+  enrollments_last_30d: number
+  last_enrollment_at?: string | null
+  total_lessons: number
+}
+
+export interface AnalyticsTrendPoint {
+  date: string
+  enrollments: number
+  completions: number
+}
+
+export interface CourseAnalyticsOut {
+  courses: CourseAnalyticsItem[]
+  total_courses: number
+  total_published: number
+  total_drafts: number
+  total_enrolled: number
+  total_completed: number
+  total_in_progress: number
+  overall_completion_rate: number
+  overall_avg_rating: number
+  total_reviews: number
+  overall_rating_distribution: Record<string, number>
+  enrollments_last_7d: number
+  enrollments_last_30d: number
+  completions_last_30d: number
+  trend: AnalyticsTrendPoint[]
+  top_courses_by_enrollment: CourseAnalyticsItem[]
+  top_courses_by_rating: CourseAnalyticsItem[]
 }
 
 export interface EnrollmentOut {
@@ -127,6 +217,20 @@ export function addSection(
   })
 }
 
+export function addSubsection(
+  token: string,
+  courseId: string,
+  sectionId: string,
+  title: string,
+  order_index: number,
+): Promise<SubsectionOut> {
+  return request<SubsectionOut>(`/courses/${courseId}/sections/${sectionId}/subsections`, token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, order_index }),
+  })
+}
+
 export function uploadMaterial(
   token: string,
   courseId: string,
@@ -164,6 +268,96 @@ export function deleteCourse(token: string, courseId: string): Promise<{ detail:
   return request<{ detail: string }>(`/courses/${courseId}`, token, { method: 'DELETE' })
 }
 
+export function deleteSection(token: string, courseId: string, sectionId: string): Promise<{ detail: string }> {
+  return request<{ detail: string }>(`/courses/${courseId}/sections/${sectionId}`, token, { method: 'DELETE' })
+}
+
+export function addLessonBlock(
+  token: string,
+  courseId: string,
+  subsectionId: string,
+  formData: FormData,
+): Promise<LessonBlockOut> {
+  return request<LessonBlockOut>(
+    `/courses/${courseId}/subsections/${subsectionId}/blocks`,
+    token,
+    { method: 'POST', body: formData },
+  )
+}
+
+export function deleteLessonBlock(token: string, blockId: string): Promise<{ detail: string }> {
+  return request<{ detail: string }>(`/courses/blocks/${blockId}`, token, { method: 'DELETE' })
+}
+
+export function updateLessonBlock(
+  token: string,
+  blockId: string,
+  content: string,
+  caption?: string,
+): Promise<LessonBlockOut> {
+  return request<LessonBlockOut>(`/courses/blocks/${blockId}`, token, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, caption }),
+  })
+}
+
+// ── Progress tracking ────────────────────────────────────────────────────────
+
+export function getCourseProgress(token: string, courseId: string): Promise<CourseProgressOut> {
+  return request<CourseProgressOut>(`/courses/${courseId}/progress`, token)
+}
+
+export function markItemCompleted(
+  token: string,
+  courseId: string,
+  subsectionId?: string,
+  materialId?: string,
+): Promise<CourseProgressOut> {
+  return request<CourseProgressOut>(`/courses/${courseId}/progress`, token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subsection_id: subsectionId ?? null, material_id: materialId ?? null }),
+  })
+}
+
+export function getCourseAnalytics(token: string): Promise<CourseAnalyticsOut> {
+  return request<CourseAnalyticsOut>('/courses/my/analytics', token)
+}
+
+// ── Feedback ─────────────────────────────────────────────────────────────────
+
+export interface FeedbackOut {
+  id: string
+  course_id: string
+  user_id: string
+  user_name: string
+  rating: number
+  comment?: string
+  created_at: string
+}
+
+export function getCourseFeedback(courseId: string): Promise<FeedbackOut[]> {
+  return request<FeedbackOut[]>(`/courses/${courseId}/feedback`)
+}
+
+export function getCourseFeedbackSummaries(): Promise<Record<string, { avg_rating: number; count: number }>> {
+  return request('/courses/feedback-summaries')
+}
+
+export function submitFeedback(
+  token: string,
+  courseId: string,
+  rating: number,
+  comment?: string,
+): Promise<FeedbackOut> {
+  return request<FeedbackOut>(`/courses/${courseId}/feedback`, token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rating, comment: comment ?? null }),
+  })
+}
+
 // ── AI course generation ──────────────────────────────────────────────────────
 
 export function uploadPdfForGeneration(
@@ -185,8 +379,24 @@ export function importGeneratedCourse(
   token: string,
   jobId: string,
   courseId: string,
+  editedResult?: GenerationJob['result'],
 ): Promise<ImportResult> {
   return request<ImportResult>(`/course-gen/${jobId}/import/${courseId}`, token, {
     method: 'POST',
+    headers: editedResult ? { 'Content-Type': 'application/json' } : {},
+    body: editedResult ? JSON.stringify({ result: editedResult }) : undefined,
   })
+}
+
+export function regenerateSubsection(
+  token: string,
+  jobId: string,
+  sectionIdx: number,
+  subsectionIdx: number,
+): Promise<{ section_index: number; subsection_index: number; subsection_title: string; content: string }> {
+  return request(
+    `/course-gen/${jobId}/sections/${sectionIdx}/subsections/${subsectionIdx}/regenerate`,
+    token,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+  )
 }

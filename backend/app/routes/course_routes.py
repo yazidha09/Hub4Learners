@@ -2,7 +2,7 @@ import os
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.controller import course_controller, notification_controller
@@ -10,7 +10,13 @@ from app.database import get_db
 from app.models.course_material import CourseMaterial
 from app.models.courses import Course
 from app.models.user import User
-from app.schemas.course import CourseOut, CourseStudentsOut, EnrollmentOut, MaterialOut, SectionCreate, SectionOut
+from app.schemas.course import (
+    BlockUpdate, CourseOut, CourseStudentsOut, EnrollmentOut, LessonBlockOut,
+    MaterialOut, SectionCreate, SectionOut, SubsectionOut, SubsectionCreate,
+    CourseProgressOut, MarkProgressRequest, CourseAnalyticsOut,
+    FeedbackCreate, FeedbackOut,
+)
+from app.utils.rag import index_course_bg
 from app.utils.security import get_current_user, require_role
 
 router = APIRouter(prefix="/courses", tags=["courses"])
@@ -186,6 +192,71 @@ def add_section(
     return course_controller.add_section(current_user["sub"], course_id, data, db)
 
 
+@router.delete("/{course_id}/sections/{section_id}")
+def delete_section(
+    course_id: str,
+    section_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_role("professor")),
+):
+    return course_controller.delete_section(current_user["sub"], course_id, section_id, db)
+
+
+@router.post("/{course_id}/sections/{section_id}/subsections", response_model=SubsectionOut)
+def add_subsection(
+    course_id: str,
+    section_id: str,
+    data: SubsectionCreate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_role("professor")),
+):
+    return course_controller.add_subsection(current_user["sub"], course_id, section_id, data, db)
+
+
+@router.post("/{course_id}/subsections/{subsection_id}/blocks", response_model=LessonBlockOut)
+async def add_block(
+    course_id: str,
+    subsection_id: str,
+    block_type: str = Form(...),
+    content: Optional[str] = Form(None),
+    caption: Optional[str] = Form(None),
+    order_index: int = Form(0),
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_role("professor")),
+):
+    return course_controller.add_block(
+        professor_id=current_user["sub"],
+        course_id=course_id,
+        subsection_id=subsection_id,
+        block_type=block_type,
+        content=content,
+        file=file,
+        caption=caption,
+        order_index=order_index,
+        db=db,
+    )
+
+
+@router.patch("/blocks/{block_id}", response_model=LessonBlockOut)
+def update_block(
+    block_id: str,
+    body: BlockUpdate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_role("professor")),
+):
+    return course_controller.update_block(current_user["sub"], block_id, body.content, body.caption, db)
+
+
+@router.delete("/blocks/{block_id}")
+def delete_block(
+    block_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_role("professor")),
+):
+    return course_controller.delete_block(current_user["sub"], block_id, db)
+
+
 @router.post("/{course_id}/sections/{section_id}/materials", response_model=MaterialOut)
 async def upload_material(
     course_id: str,
@@ -219,6 +290,14 @@ def get_my_students(
     return course_controller.get_my_students(current_user["sub"], db)
 
 
+@router.get("/my/analytics", response_model=CourseAnalyticsOut)
+def get_analytics(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_role("professor")),
+):
+    return course_controller.get_professor_analytics(current_user["sub"], db)
+
+
 @router.delete("/{course_id}")
 def delete_course(
     course_id: str,
@@ -231,14 +310,24 @@ def delete_course(
 @router.patch("/{course_id}/publish", response_model=CourseOut)
 def toggle_publish(
     course_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_role("professor")),
 ):
-    return course_controller.toggle_publish(current_user["sub"], course_id, db)
+    result = course_controller.toggle_publish(current_user["sub"], course_id, db)
+    # Auto-index into Pinecone whenever the course becomes published
+    if result.is_published:
+        background_tasks.add_task(index_course_bg, course_id)
+    return result
 
 
 # ── Student / public routes ───────────────────────────────────────────────────
 # NOTE: specific paths (/enrolled) must come before the /{course_id} wildcard.
+
+@router.get("/feedback-summaries")
+def feedback_summaries(db: Session = Depends(get_db)):
+    return course_controller.get_feedback_summaries(db)
+
 
 @router.get("/enrolled", response_model=List[CourseOut])
 def get_enrolled_courses(
@@ -251,6 +340,27 @@ def get_enrolled_courses(
 @router.get("", response_model=List[CourseOut])
 def list_courses(category_id: Optional[str] = None, db: Session = Depends(get_db)):
     return course_controller.list_published_courses(db, category_id=category_id)
+
+
+@router.get("/{course_id}/progress", response_model=CourseProgressOut)
+def get_progress(
+    course_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    return course_controller.get_course_progress(current_user["sub"], course_id, db)
+
+
+@router.post("/{course_id}/progress", response_model=CourseProgressOut)
+def mark_progress(
+    course_id: str,
+    body: MarkProgressRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    return course_controller.mark_item_completed(
+        current_user["sub"], course_id, body.subsection_id, body.material_id, db
+    )
 
 
 @router.get("/{course_id}", response_model=CourseOut)
@@ -286,3 +396,20 @@ def unenroll(
     current_user: dict = Depends(get_current_user),
 ):
     return course_controller.unenroll_student(current_user["sub"], course_id, db)
+
+
+# ── Feedback ──────────────────────────────────────────────────────────────────
+
+@router.get("/{course_id}/feedback", response_model=List[FeedbackOut])
+def get_feedback(course_id: str, db: Session = Depends(get_db)):
+    return course_controller.get_course_feedback(course_id, db)
+
+
+@router.post("/{course_id}/feedback", response_model=FeedbackOut)
+def submit_feedback(
+    course_id: str,
+    body: FeedbackCreate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    return course_controller.create_feedback(current_user["sub"], course_id, body.rating, body.comment, db)

@@ -25,6 +25,7 @@ def _build_user_out(user: User, db: Session) -> UserOut:
         role=user.role,
         is_verified=user.is_verified,
         bio=user.bio,
+        speciality=user.speciality,
         profile_image=user.profile_image,
         university_id=str(user.university_id) if user.university_id else None,
         region_id=str(user.region_id) if user.region_id else None,
@@ -100,6 +101,8 @@ def update_user_profile(user_id: str, data: UpdateProfileRequest, db: Session) -
         user.full_name = data.full_name
     if data.bio is not None:
         user.bio = data.bio
+    if data.speciality is not None:
+        user.speciality = data.speciality
 
     # University self-assignment — professors must use the join-request flow
     if data.university_id is not None:

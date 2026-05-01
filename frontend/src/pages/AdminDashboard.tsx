@@ -4,7 +4,8 @@ import DashboardLayout, { type NavItem } from '../components/DashboardLayout'
 import {
   getStats, listUsers, changeUserRole, deleteUser,
   listAllCourses, adminTogglePublish, adminDeleteCourse,
-  type AdminUser, type PlatformStats, ROLE_LABELS, ALL_ROLES,
+  listAnnouncements, createAnnouncement,
+  type AdminUser, type PlatformStats, type AnnouncementOut, ROLE_LABELS, ALL_ROLES,
 } from '../api/admin'
 import {
   listRegions, createRegion, deleteRegion,
@@ -48,6 +49,11 @@ const OrgIcon = () => (
     <circle cx="12" cy="5" r="2" /><path d="M12 7v4" /><path d="M8 13H4a2 2 0 0 0-2 2v2h8" /><path d="M16 13h4a2 2 0 0 1 2 2v2h-8" /><circle cx="12" cy="15" r="2" /><circle cx="5" cy="19" r="2" /><circle cx="19" cy="19" r="2" />
   </svg>
 )
+const MegaphoneIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 11l19-9-9 19-2-8-8-2z" />
+  </svg>
+)
 
 const ALL_NAV: NavItem[] = [
   { id: 'home',             label: 'Overview',              icon: <HomeIcon /> },
@@ -56,13 +62,14 @@ const ALL_NAV: NavItem[] = [
   { id: 'courses',          label: 'Courses',               icon: <BookIcon /> },
   { id: 'categories',       label: 'Categories',            icon: <TagIcon /> },
   { id: 'prof-verif',       label: 'Prof. Verifications',   icon: <ShieldIcon /> },
+  { id: 'announcements',    label: 'Announcements',         icon: <MegaphoneIcon /> },
 ]
 
 // Which nav items each role may see
 const NAV_ALLOW: Record<string, string[]> = {
   super_admin:      ['home', 'org', 'users', 'categories', 'prof-verif'],
   regional_admin:   ['home', 'org', 'users', 'courses', 'prof-verif'],
-  university_admin: ['home', 'org', 'users', 'courses'],
+  university_admin: ['home', 'org', 'users', 'announcements'],
 }
 
 function getNav(role: string): NavItem[] {
@@ -106,7 +113,7 @@ function OverviewPanel({ token, userRole, universityName, regionName, onNav }: {
 
     const quickActions = userRole === 'regional_admin'
       ? [{ label: 'Manage Universities', nav: 'org' }, { label: 'Manage Users', nav: 'users' }, { label: 'Prof. Verifications', nav: 'prof-verif' }]
-      : [{ label: 'Create Professors', nav: 'org' }, { label: 'View Courses', nav: 'courses' }, { label: 'Manage Users', nav: 'users' }]
+      : [{ label: 'Create Professors', nav: 'org' }, { label: 'Manage Users', nav: 'users' }]
 
     return (
       <div className="max-w-[1020px] mx-auto px-6 md:px-10 py-8">
@@ -612,7 +619,7 @@ function CoursesPanel({ token, userRole }: { token: string; userRole: string }) 
                   {c.category_name && (
                     <span className="text-[10px] font-semibold text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full">{c.category_name}</span>
                   )}
-                  <span className="text-xs text-slate-400">{c.sections.length} sections</span>
+                  <span className="text-xs text-slate-400">{c.sections_count} sections</span>
                   <span className="text-xs text-slate-400">{c.enrolled_count} enrolled</span>
                 </div>
               </div>
@@ -1457,6 +1464,115 @@ function ProfVerificationPanel({ token }: { token: string }) {
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
+   ANNOUNCEMENTS PANEL
+   ════════════════════════════════════════════════════════════════════════════ */
+
+function AnnouncementsPanel({ token }: { token: string }) {
+  const [announcements, setAnnouncements] = useState<AnnouncementOut[]>([])
+  const [loading, setLoading] = useState(true)
+  const [title, setTitle] = useState('')
+  const [body, setBody] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [err, setErr] = useState('')
+  const [successCount, setSuccessCount] = useState<number | null>(null)
+
+  useEffect(() => {
+    setLoading(true)
+    listAnnouncements(token)
+      .then(setAnnouncements)
+      .catch(e => setErr(e.message))
+      .finally(() => setLoading(false))
+  }, [token])
+
+  const handlePublish = async () => {
+    if (!title.trim() || !body.trim()) return
+    setSubmitting(true); setErr(''); setSuccessCount(null)
+    try {
+      const result = await createAnnouncement(token, title.trim(), body.trim())
+      setAnnouncements(prev => [result, ...prev])
+      setSuccessCount(result.recipient_count)
+      setTitle('')
+      setBody('')
+    } catch (e: any) { setErr(e.message) }
+    finally { setSubmitting(false) }
+  }
+
+  return (
+    <div className="max-w-[700px] animate-fadeIn">
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Announcements</h2>
+        <p className="text-sm text-slate-500 mt-1">Publish a notice — every member of your university will receive it as a notification</p>
+      </div>
+
+      {/* Compose form */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-6 mb-6 shadow-sm">
+        <p className="text-[0.7rem] font-bold tracking-[0.1em] uppercase text-[#FF5533] mb-4">New Announcement</p>
+        <div className="flex flex-col gap-3">
+          <input
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            placeholder="Title"
+            className="h-10 px-3 border border-[#E5E7EB] rounded-lg text-sm outline-none focus:shadow-[0_0_0_3px_rgba(12,12,15,0.07)] transition-shadow"
+          />
+          <textarea
+            value={body}
+            onChange={e => setBody(e.target.value)}
+            placeholder="Write your announcement here…"
+            rows={4}
+            className="px-3 py-2.5 border border-[#E5E7EB] rounded-lg text-sm outline-none focus:shadow-[0_0_0_3px_rgba(12,12,15,0.07)] transition-shadow resize-none"
+          />
+          {err && <p className="text-xs text-red-500">{err}</p>}
+          {successCount !== null && (
+            <p className="text-xs text-emerald-600 font-medium">
+              Sent to {successCount} member{successCount !== 1 ? 's' : ''}
+            </p>
+          )}
+          <button
+            onClick={handlePublish}
+            disabled={submitting || !title.trim() || !body.trim()}
+            className="self-end h-10 px-5 rounded-lg text-sm font-semibold bg-[#0C0C0F] text-white hover:bg-[#1E1E23] disabled:bg-[#D1D5DB] disabled:cursor-not-allowed transition-colors cursor-pointer"
+          >
+            {submitting ? 'Publishing…' : 'Publish'}
+          </button>
+        </div>
+      </div>
+
+      {/* Past announcements */}
+      <div>
+        <p className="text-[0.7rem] font-bold tracking-[0.1em] uppercase text-slate-400 mb-3">Past Announcements</p>
+        {loading ? (
+          <p className="text-sm text-slate-400 py-8 text-center">Loading…</p>
+        ) : announcements.length === 0 ? (
+          <div className="text-center py-14 bg-white rounded-2xl border border-dashed border-slate-200">
+            <p className="text-sm font-semibold text-slate-900 mb-1">No announcements yet</p>
+            <p className="text-xs text-slate-400">Your published announcements will appear here</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {announcements.map(a => (
+              <div key={a.id} className="bg-white rounded-xl border border-slate-200 px-5 py-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900 truncate">{a.title}</p>
+                    <p className="text-sm text-slate-500 mt-1 whitespace-pre-wrap">{a.body}</p>
+                  </div>
+                  <span className="shrink-0 text-[11px] text-slate-400 whitespace-nowrap mt-0.5">
+                    {new Date(a.created_at).toLocaleDateString()}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-3">
+                  {a.recipient_count} recipient{a.recipient_count !== 1 ? 's' : ''}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
    MAIN ADMIN DASHBOARD
    ════════════════════════════════════════════════════════════════════════════ */
 
@@ -1523,11 +1639,12 @@ export default function AdminDashboard() {
     return wrapper('Users', scopeNote, <UsersPanel token={token!} userRole={role} />)
   }
 
-  if (activeNav === 'courses') {
-    const courseSubtitle = role === 'university_admin'
-      ? 'View and manage courses from professors in your university.'
-      : 'View all courses, toggle publish status, or remove them.'
-    return wrapper('Courses', courseSubtitle, <CoursesPanel token={token!} userRole={role} />)
+  if (activeNav === 'announcements') {
+    return wrapper('Announcements', 'Publish notices to all members of your university.', <AnnouncementsPanel token={token!} />)
+  }
+
+  if (activeNav === 'courses' && role !== 'university_admin') {
+    return wrapper('Courses', 'View all courses, toggle publish status, or remove them.', <CoursesPanel token={token!} userRole={role} />)
   }
 
   if (activeNav === 'categories') {
