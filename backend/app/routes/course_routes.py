@@ -1,11 +1,14 @@
 import os
+import traceback
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.controller import course_controller, notification_controller
+from app.controller.student_analytics_controller import get_student_analytics
+from app.controller.learner_analytics_controller import get_learner_analytics
 from app.database import get_db
 from app.models.course_material import CourseMaterial
 from app.models.courses import Course
@@ -16,7 +19,9 @@ from app.schemas.course import (
     CourseProgressOut, MarkProgressRequest, CourseAnalyticsOut,
     FeedbackCreate, FeedbackOut,
 )
-from app.utils.rag import index_course_bg
+from app.schemas.student_analytics import StudentAnalyticsOut
+from app.schemas.learner_analytics import LearnerAnalyticsOut
+from app.utils.rag import index_course_bg, index_course_sync
 from app.utils.security import get_current_user, require_role
 
 router = APIRouter(prefix="/courses", tags=["courses"])
@@ -158,6 +163,7 @@ async def create_course(
     title: str = Form(...),
     description: Optional[str] = Form(None),
     is_free: bool = Form(True),
+    price: float = Form(0.0),
     category_id: Optional[str] = Form(None),
     thumbnail: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
@@ -168,6 +174,7 @@ async def create_course(
         title=title,
         description=description,
         is_free=is_free,
+        price=price,
         category_id=category_id,
         thumbnail_file=thumbnail,
         db=db,
@@ -189,7 +196,9 @@ def add_section(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_role("professor")),
 ):
-    return course_controller.add_section(current_user["sub"], course_id, data, db)
+    result = course_controller.add_section(current_user["sub"], course_id, data, db)
+    index_course_bg(course_id)
+    return result
 
 
 @router.delete("/{course_id}/sections/{section_id}")
@@ -199,7 +208,9 @@ def delete_section(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_role("professor")),
 ):
-    return course_controller.delete_section(current_user["sub"], course_id, section_id, db)
+    result = course_controller.delete_section(current_user["sub"], course_id, section_id, db)
+    index_course_bg(course_id)
+    return result
 
 
 @router.post("/{course_id}/sections/{section_id}/subsections", response_model=SubsectionOut)
@@ -210,7 +221,9 @@ def add_subsection(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_role("professor")),
 ):
-    return course_controller.add_subsection(current_user["sub"], course_id, section_id, data, db)
+    result = course_controller.add_subsection(current_user["sub"], course_id, section_id, data, db)
+    index_course_bg(course_id)
+    return result
 
 
 @router.post("/{course_id}/subsections/{subsection_id}/blocks", response_model=LessonBlockOut)
@@ -225,7 +238,7 @@ async def add_block(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_role("professor")),
 ):
-    return course_controller.add_block(
+    result = course_controller.add_block(
         professor_id=current_user["sub"],
         course_id=course_id,
         subsection_id=subsection_id,
@@ -236,6 +249,9 @@ async def add_block(
         order_index=order_index,
         db=db,
     )
+    if block_type == "text":
+        index_course_bg(course_id)
+    return result
 
 
 @router.patch("/blocks/{block_id}", response_model=LessonBlockOut)
@@ -245,7 +261,11 @@ def update_block(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_role("professor")),
 ):
-    return course_controller.update_block(current_user["sub"], block_id, body.content, body.caption, db)
+    result = course_controller.update_block(current_user["sub"], block_id, body.content, body.caption, db)
+    course_id = course_controller.get_course_id_for_block(block_id, db)
+    if course_id:
+        index_course_bg(course_id)
+    return result
 
 
 @router.delete("/blocks/{block_id}")
@@ -254,7 +274,11 @@ def delete_block(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_role("professor")),
 ):
-    return course_controller.delete_block(current_user["sub"], block_id, db)
+    course_id = course_controller.get_course_id_for_block(block_id, db)
+    result = course_controller.delete_block(current_user["sub"], block_id, db)
+    if course_id:
+        index_course_bg(course_id)
+    return result
 
 
 @router.post("/{course_id}/sections/{section_id}/materials", response_model=MaterialOut)
@@ -269,7 +293,7 @@ async def upload_material(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_role("professor")),
 ):
-    return course_controller.upload_material(
+    result = course_controller.upload_material(
         professor_id=current_user["sub"],
         course_id=course_id,
         section_id=section_id,
@@ -280,6 +304,8 @@ async def upload_material(
         file=file,
         db=db,
     )
+    index_course_bg(course_id)
+    return result
 
 
 @router.get("/my/students", response_model=List[CourseStudentsOut])
@@ -310,14 +336,20 @@ def delete_course(
 @router.patch("/{course_id}/publish", response_model=CourseOut)
 def toggle_publish(
     course_id: str,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_role("professor")),
 ):
     result = course_controller.toggle_publish(current_user["sub"], course_id, db)
-    # Auto-index into Pinecone whenever the course becomes published
+    # Publish is the canonical "make AI ready" event — index synchronously so
+    # we know whether it succeeded before returning. Failure logs but does not
+    # roll back the publish (the professor can manually retry via /api/ai/reindex).
     if result.is_published:
-        background_tasks.add_task(index_course_bg, course_id)
+        try:
+            n = index_course_sync(course_id)
+            print(f"[RAG] toggle_publish: indexed {n} chunks for course {course_id}")
+        except Exception as exc:
+            print(f"[RAG] toggle_publish indexing FAILED for course {course_id}: {exc}")
+            traceback.print_exc()
     return result
 
 
@@ -335,6 +367,22 @@ def get_enrolled_courses(
     current_user: dict = Depends(get_current_user),
 ):
     return course_controller.get_enrolled_courses(current_user["sub"], db)
+
+
+@router.get("/student/analytics", response_model=StudentAnalyticsOut)
+def student_analytics(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    return get_student_analytics(current_user["sub"], db)
+
+
+@router.get("/professor/learners/analytics", response_model=LearnerAnalyticsOut)
+def learner_analytics(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_role("professor")),
+):
+    return get_learner_analytics(current_user["sub"], db)
 
 
 @router.get("", response_model=List[CourseOut])

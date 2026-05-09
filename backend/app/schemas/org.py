@@ -49,7 +49,6 @@ class CreateAdminRequest(BaseModel):
     full_name: str
     email: str
     password: str
-    region_id: Optional[str] = None       # required for regional_admin
     university_id: Optional[str] = None   # required for university_admin
 
 

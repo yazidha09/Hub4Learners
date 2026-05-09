@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import RichTextEditor from '../components/RichTextEditor'
 import { useNavigate } from 'react-router-dom'
@@ -7,24 +7,22 @@ import DashboardLayout, { type NavItem } from '../components/DashboardLayout'
 import {
   getMyCourses, getCourseDetail, createCourse, addSection, addSubsection, togglePublish, listPublishedCourses,
   getMyStudents, getEnrolledCourses, enrollInCourse, unenrollFromCourse, deleteCourse, deleteSection,
-  addLessonBlock, deleteLessonBlock, updateLessonBlock,
+  addLessonBlock, deleteLessonBlock, updateLessonBlock, getLearnerAnalytics,
   uploadPdfForGeneration, pollGenerationJob, importGeneratedCourse, regenerateSubsection,
   type CourseOut, type SubsectionOut, type LessonBlockOut, type CourseStudentsOut, type GenerationJob,
+  type LearnerAnalyticsOut, type LearnerActivityPoint, type LearnerSummary,
 } from '../api/course'
 import { listCategories, type CategoryOut } from '../api/category'
+import { createCheckoutSession } from '../api/payment'
 import { getIncomingChatRequests, reviewChatRequest, getAutoRefuse, setAutoRefuse, type ChatRequestOut } from '../api/chat'
 import ChatRoom from '../components/ChatRoom'
 import FriendsMessenger from '../components/FriendsMessenger'
 import FindFriends from '../components/FindFriends'
 import {
-  listUniversities, listRegions, submitJoinRequest, listJoinRequests, cancelJoinRequest,
-  type UniversityOut, type JoinRequestOut, type RegionOut,
+  listUniversities, submitJoinRequest, listJoinRequests, cancelJoinRequest,
+  type UniversityOut, type JoinRequestOut,
 } from '../api/org'
 import { getMyAnnouncements, type AnnouncementOut } from '../api/admin'
-import {
-  submitVerification, listVerifications, cancelVerification,
-  type ProfVerificationOut,
-} from '../api/prof_verification'
 
 /* ── Icons ── */
 const HomeIcon = () => (
@@ -99,201 +97,6 @@ const ACTIVITY = [
   { student: 'Yasmine K.', action: 'asked a question in', course: 'Deep Learning', time: '15m ago' },
   { student: 'Karim M.', action: 'completed Quiz 5 in', course: 'Neural Networks', time: '1h ago' },
 ]
-
-/* ── Professor Verification Banner ── */
-function VerificationBanner({ token }: { token: string }) {
-  const { } = useAuth()
-  const [regions, setRegions] = useState<RegionOut[]>([])
-  const [requests, setRequests] = useState<ProfVerificationOut[]>([])
-  const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({
-    region_id: '',
-    birth_date: '',
-    first_name: '',
-    father_name: '',
-    grandfather_name: '',
-  })
-  const [saving, setSaving] = useState(false)
-  const [cancelling, setCancelling] = useState(false)
-  const [err, setErr] = useState('')
-
-  const pending = requests.find(r => r.status === 'pending')
-  const rejected = requests.find(r => r.status === 'rejected')
-
-  useEffect(() => {
-    listRegions(token).then(setRegions).catch(() => {})
-    listVerifications(token).then(setRequests).catch(() => {})
-  }, [token])
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!form.region_id || !form.birth_date || !form.first_name || !form.father_name || !form.grandfather_name) return
-    setSaving(true); setErr('')
-    try {
-      const req = await submitVerification(token, {
-        region_id: form.region_id,
-        birth_date: form.birth_date,
-        first_name: form.first_name.trim(),
-        father_name: form.father_name.trim(),
-        grandfather_name: form.grandfather_name.trim(),
-      })
-      setRequests(prev => [req, ...prev])
-      setShowForm(false)
-    } catch (e: any) { setErr(e.message) }
-    finally { setSaving(false) }
-  }
-
-  const handleCancel = async (id: string) => {
-    setCancelling(true)
-    try {
-      await cancelVerification(token, id)
-      setRequests(prev => prev.filter(r => r.id !== id))
-    } catch (e: any) { setErr(e.message) }
-    finally { setCancelling(false) }
-  }
-
-  const inputCls = 'h-10 px-3 border border-amber-200 rounded-lg text-[0.87rem] text-[#0C0C0F] bg-white outline-none placeholder:text-[#C4C9D4] focus:border-amber-500 focus:shadow-[0_0_0_3px_rgba(217,119,6,0.1)] transition-[border-color,box-shadow] w-full'
-
-  return (
-    <div className="mb-8 rounded-2xl border-2 border-amber-300 bg-amber-50 p-5 shadow-[0_8px_24px_rgba(217,119,6,0.1)]">
-      <div className="flex items-start gap-4">
-        <div className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-200 flex items-center justify-center shrink-0 text-amber-600">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-          </svg>
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <p className="text-[0.92rem] font-bold text-amber-900">Account not verified</p>
-            <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-800 text-[0.7rem] font-bold uppercase tracking-wide">Draft only</span>
-          </div>
-          <p className="text-[0.84rem] text-amber-700 leading-relaxed">
-            You can create and edit courses, but publishing requires verification by a region admin.
-            Submit your civil identity details below to request verification.
-          </p>
-
-          {/* Pending request state */}
-          {pending && !showForm && (
-            <div className="mt-3 flex items-center justify-between bg-white border border-amber-200 rounded-xl px-4 py-3">
-              <div>
-                <p className="text-[0.8rem] font-semibold text-amber-800">Verification request pending</p>
-                <p className="text-[0.76rem] text-amber-600 mt-0.5">
-                  Region: {pending.region_name} · Submitted {new Date(pending.created_at).toLocaleDateString()}
-                </p>
-              </div>
-              <button
-                onClick={() => handleCancel(pending.id)}
-                disabled={cancelling}
-                className="text-xs font-semibold text-amber-600 hover:text-red-600 bg-transparent border-none cursor-pointer disabled:opacity-50 transition-colors"
-              >
-                {cancelling ? '...' : 'Cancel'}
-              </button>
-            </div>
-          )}
-
-          {/* Rejected state */}
-          {rejected && !pending && !showForm && (
-            <div className="mt-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
-              <p className="text-[0.8rem] font-semibold text-red-700">Previous request rejected</p>
-              <p className="text-[0.76rem] text-red-500 mt-0.5">You can submit a new request.</p>
-            </div>
-          )}
-
-          {/* Submit form */}
-          {showForm ? (
-            <form onSubmit={handleSubmit} className="mt-4 space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="block text-[0.7rem] font-bold uppercase tracking-wide text-amber-700 mb-1">Region *</label>
-                  <select
-                    value={form.region_id}
-                    onChange={e => setForm(f => ({ ...f, region_id: e.target.value }))}
-                    className="h-10 px-3 border border-amber-200 rounded-lg text-[0.87rem] bg-white outline-none focus:border-amber-500 focus:shadow-[0_0_0_3px_rgba(217,119,6,0.1)] transition-all w-full"
-                    required
-                  >
-                    <option value="">Select your region</option>
-                    {regions.map(r => (
-                      <option key={r.id} value={r.id}>{r.name}{r.code ? ` (${r.code})` : ''}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-[0.7rem] font-bold uppercase tracking-wide text-amber-700 mb-1">Date of birth *</label>
-                  <input
-                    type="date"
-                    value={form.birth_date}
-                    onChange={e => setForm(f => ({ ...f, birth_date: e.target.value }))}
-                    className={inputCls}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-[0.7rem] font-bold uppercase tracking-wide text-amber-700 mb-1">Your first name *</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Ahmed"
-                    value={form.first_name}
-                    onChange={e => setForm(f => ({ ...f, first_name: e.target.value }))}
-                    className={inputCls}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-[0.7rem] font-bold uppercase tracking-wide text-amber-700 mb-1">Father's name *</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Mohamed"
-                    value={form.father_name}
-                    onChange={e => setForm(f => ({ ...f, father_name: e.target.value }))}
-                    className={inputCls}
-                    required
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-[0.7rem] font-bold uppercase tracking-wide text-amber-700 mb-1">Grandfather's name *</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Ali"
-                    value={form.grandfather_name}
-                    onChange={e => setForm(f => ({ ...f, grandfather_name: e.target.value }))}
-                    className={inputCls}
-                    required
-                  />
-                </div>
-              </div>
-              {err && <p className="text-xs text-red-600">{err}</p>}
-              <div className="flex gap-2">
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="h-9 px-5 rounded-lg bg-amber-600 text-white text-[0.84rem] font-semibold cursor-pointer hover:bg-amber-700 disabled:bg-amber-300 border-none transition-colors"
-                >
-                  {saving ? 'Submitting...' : 'Submit for verification'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setShowForm(false); setErr('') }}
-                  className="h-9 px-4 rounded-lg text-[0.84rem] font-semibold text-amber-700 bg-amber-100 hover:bg-amber-200 border-none cursor-pointer transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          ) : (
-            !pending && (
-              <button
-                onClick={() => setShowForm(true)}
-                className="mt-3 text-[0.82rem] font-semibold text-amber-700 hover:text-amber-900 underline underline-offset-2 bg-transparent border-none cursor-pointer p-0 transition-colors"
-              >
-                + Request verification from region admin
-              </button>
-            )
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
 
 /* ── University affiliation card (request-based) ── */
 function UniversityCard({ token }: { token: string }) {
@@ -943,7 +746,6 @@ function CourseManager({ token, course, onBack, onRefresh }: {
     }
   }
 
-  const canPublish = user?.is_verified !== false || current.is_published
 
   return (
     <div className="max-w-[800px] animate-fadeIn">
@@ -1014,14 +816,11 @@ function CourseManager({ token, course, onBack, onRefresh }: {
             )}
             <button
               onClick={handleTogglePublish}
-              disabled={publishing || !canPublish}
-              title={!canPublish ? 'Verify your account to publish courses' : undefined}
+              disabled={publishing}
               className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-xl border-none cursor-pointer transition-all duration-200 ${
                 current.is_published
                   ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                  : canPublish
-                    ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 hover:bg-emerald-600 hover:-translate-y-0.5'
-                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                  : 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 hover:bg-emerald-600 hover:-translate-y-0.5'
               } disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0`}
             >
               {publishing ? (
@@ -1550,6 +1349,7 @@ function NewCourseModal({ token, onClose, onCreate }: {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [isFree, setIsFree] = useState(true)
+  const [price, setPrice] = useState('10')
   const [categoryId, setCategoryId] = useState('')
   const [categories, setCategories] = useState<CategoryOut[]>([])
   const [thumbnail, setThumbnail] = useState<File | null>(null)
@@ -1583,12 +1383,20 @@ function NewCourseModal({ token, onClose, onCreate }: {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!title.trim()) return
+    if (!isFree) {
+      const numeric = Number(price)
+      if (!Number.isFinite(numeric) || numeric < 10) {
+        setErr('Paid courses must cost at least $10.')
+        return
+      }
+    }
     setSaving(true); setErr('')
     try {
       const fd = new FormData()
       fd.append('title', title.trim())
       if (description.trim()) fd.append('description', description.trim())
       fd.append('is_free', String(isFree))
+      fd.append('price', isFree ? '0' : String(Number(price)))
       if (categoryId) fd.append('category_id', categoryId)
       if (thumbnail) fd.append('thumbnail', thumbnail)
       const course = await createCourse(token, fd)
@@ -1684,16 +1492,54 @@ function NewCourseModal({ token, onClose, onCreate }: {
               <FilePicker accept=".jpg,.jpeg,.png,.webp" file={thumbnail} onChange={setThumbnail} />
             </div>
 
-            <label className="flex items-center gap-3 cursor-pointer select-none py-1">
-              <div
-                onClick={() => setIsFree(v => !v)}
-                className={`relative w-11 h-6 rounded-full transition-colors duration-300 ${isFree ? 'bg-slate-900' : 'bg-slate-200'}`}
-              >
-                <span className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-300 ${isFree ? 'translate-x-5' : 'translate-x-0'}`} />
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Pricing</label>
+              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setIsFree(true)}
+                  className={`h-9 rounded-lg text-xs font-semibold transition-all duration-150 border-none cursor-pointer ${
+                    isFree ? 'bg-white text-slate-900 shadow-sm' : 'bg-transparent text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  Free
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsFree(false)}
+                  className={`h-9 rounded-lg text-xs font-semibold transition-all duration-150 border-none cursor-pointer ${
+                    !isFree ? 'bg-white text-slate-900 shadow-sm' : 'bg-transparent text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  Paid
+                </button>
               </div>
-              <span className="text-sm font-medium text-slate-700">Free course</span>
-            </label>
-            
+
+              {!isFree && (
+                <div className="mt-3">
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base font-semibold text-slate-400">$</span>
+                    <input
+                      type="number"
+                      min={10}
+                      step={1}
+                      value={price}
+                      onChange={e => setPrice(e.target.value)}
+                      placeholder="10"
+                      className="w-full h-11 pl-9 pr-16 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-300 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100 transition-all duration-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-slate-400 tracking-wider">USD</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-2 text-[11px] text-slate-500">
+                    <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" />
+                    </svg>
+                    <span>Secured by Stripe · minimum $10</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="flex gap-3 pt-2">
               <button
                 type="button"
@@ -1704,7 +1550,7 @@ function NewCourseModal({ token, onClose, onCreate }: {
               </button>
               <button
                 type="submit"
-                disabled={!title.trim() || !categoryId || saving}
+                disabled={!title.trim() || !categoryId || saving || (!isFree && (Number(price) < 10 || !Number.isFinite(Number(price))))}
                 className="flex-1 h-11 rounded-xl text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed transition-all duration-200"
               >
                 {saving ? (
@@ -1751,7 +1597,13 @@ function BrowseCoursesSection({ token, currentUserId }: { token: string; current
 
   const handleEnroll = async (courseId: string) => {
     setEnrollingId(courseId); setErr('')
+    const course = courses.find(c => c.id === courseId)
     try {
+      if (course && !course.is_free) {
+        const session = await createCheckoutSession(token, courseId)
+        window.location.href = session.url
+        return
+      }
       await enrollInCourse(token, courseId)
       setEnrolledIds(prev => new Set(prev).add(courseId))
     } catch (e: any) {
@@ -1817,13 +1669,29 @@ function BrowseCoursesSection({ token, currentUserId }: { token: string; current
                   </svg>
                   Start Learning
                 </button>
-              ) : (
+              ) : selected.is_free ? (
                 <button
                   onClick={() => handleEnroll(selected.id)}
                   disabled={enrollingId === selected.id}
                   className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-[#FF5533] to-[#e5482b] text-white rounded-xl text-sm font-semibold hover:shadow-md border-none cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-200">
-                  {enrollingId === selected.id ? 'Enrolling...' : 'Enroll in this course'}
+                  {enrollingId === selected.id ? 'Enrolling...' : 'Enroll for free'}
                 </button>
+              ) : (
+                <div className="inline-flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                  <div className="flex items-baseline gap-1 pr-3 border-r border-slate-100">
+                    <span className="text-xl font-bold text-slate-900 tabular-nums">${Number(selected.price).toFixed(0)}</span>
+                    <span className="text-[10px] font-medium text-slate-400">USD</span>
+                  </div>
+                  <button
+                    onClick={() => handleEnroll(selected.id)}
+                    disabled={enrollingId === selected.id}
+                    className="inline-flex items-center gap-1.5 px-4 h-9 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 border-none cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed transition-colors duration-200">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" />
+                    </svg>
+                    {enrollingId === selected.id ? 'Redirecting…' : 'Enroll · Pay securely'}
+                  </button>
+                </div>
               )}
               {err && <span className="text-xs text-red-500">{err}</span>}
             </div>
@@ -2008,9 +1876,11 @@ function BrowseCoursesSection({ token, currentUserId }: { token: string; current
               <div className="p-4">
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <h3 className="font-semibold text-slate-900 leading-snug line-clamp-2 group-hover:text-[#FF5533] transition-colors duration-200">{c.title}</h3>
-                  <span className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded-full ${c.is_free ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600'}`}>
-                    {c.is_free ? 'Free' : 'Paid'}
-                  </span>
+                  {c.is_free ? (
+                    <span className="shrink-0 text-[10px] font-bold px-2 py-1 rounded-full bg-blue-50 text-blue-600 uppercase tracking-wide">Free</span>
+                  ) : (
+                    <span className="shrink-0 text-[11px] font-bold text-slate-900 tabular-nums">${Number(c.price).toFixed(0)}</span>
+                  )}
                 </div>
                 {c.category_name && (
                   <span className="inline-block text-[10px] font-semibold text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full mb-2">{c.category_name}</span>
@@ -2045,8 +1915,12 @@ function BrowseCoursesSection({ token, currentUserId }: { token: string; current
                     <button
                       onClick={e => { e.stopPropagation(); handleEnroll(c.id) }}
                       disabled={!!enrollingId}
-                      className="shrink-0 px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-[#FF5533] to-[#e5482b] text-white rounded-lg border-none cursor-pointer shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200">
-                      {enrollingId === c.id ? '...' : 'Enroll'}
+                      className={`shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg border-none cursor-pointer shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 ${
+                        c.is_free
+                          ? 'bg-gradient-to-r from-[#FF5533] to-[#e5482b] text-white'
+                          : 'bg-slate-900 text-white hover:bg-slate-800'
+                      }`}>
+                      {enrollingId === c.id ? '...' : (c.is_free ? 'Enroll' : `Buy · $${Number(c.price).toFixed(0)}`)}
                     </button>
                   )}
                 </div>
@@ -2088,75 +1962,69 @@ function CoursesSection({ token }: { token: string }) {
   }
 
   return (
-    <div className="max-w-[900px] animate-fadeIn">
+    <div className="max-w-[1080px] animate-fadeIn">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-end justify-between mb-8 flex-wrap gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">My Courses</h2>
-          <p className="text-sm text-slate-500 mt-1">Create and manage your courses</p>
+          <h2 className="text-[1.6rem] font-semibold tracking-[-0.02em] text-[#0C0C0F]">My courses</h2>
+          <p className="text-[0.86rem] text-[#64748B] mt-1">Create and manage your courses.</p>
         </div>
         <button onClick={() => setShowNew(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 text-white text-sm font-semibold rounded-xl hover:bg-slate-800 shadow-lg shadow-slate-900/20 hover:shadow-slate-900/30 transition-all duration-200">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          className="inline-flex items-center gap-2 h-10 px-5 bg-[#0C0C0F] text-white text-[0.84rem] font-semibold rounded-lg hover:bg-[#1E1E23] transition-colors border-none cursor-pointer">
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
-          New Course
+          New course
         </button>
       </div>
 
       {loading ? (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {[...Array(3)].map((_, i) => (
-            <div key={i} className="h-20 rounded-2xl skeleton" />
+            <div key={i} className="h-[68px] rounded-xl skeleton" />
           ))}
         </div>
       ) : courses.length === 0 ? (
-        <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-200">
-          <div className="w-14 h-14 mx-auto mb-4 bg-slate-100 rounded-2xl flex items-center justify-center">
-            <svg className="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-            </svg>
-          </div>
-          <p className="text-base font-semibold text-slate-900 mb-1">No courses yet</p>
-          <p className="text-sm text-slate-500 mb-4">Create your first course to get started</p>
-          <button 
+        <div className="text-center py-20 bg-white rounded-xl border border-dashed border-[#E5E7EB]">
+          <p className="text-[1rem] font-semibold text-[#0C0C0F] mb-1">No courses yet</p>
+          <p className="text-[0.86rem] text-[#64748B] mb-6">Create your first course to get started.</p>
+          <button
             onClick={() => setShowNew(true)}
-            className="px-4 py-2 text-sm font-semibold text-white bg-slate-900 rounded-xl hover:bg-slate-800 transition-colors duration-200"
+            className="h-10 px-5 text-[0.84rem] font-semibold text-white bg-[#0C0C0F] rounded-lg hover:bg-[#1E1E23] transition-colors border-none cursor-pointer"
           >
             Create course
           </button>
         </div>
       ) : (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] overflow-hidden">
-          {courses.map((c, i) => (
+        <div className="bg-white rounded-xl border border-[#E5E7EB] divide-y divide-[#F1F3F5] overflow-hidden">
+          {courses.map(c => (
             <div
               key={c.id}
               onClick={async () => { const full = await getCourseDetail(c.id); setSelected(full) }}
-              className={`group flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-slate-50 transition-all duration-200 ${i !== courses.length - 1 ? 'border-b border-slate-100' : ''}`}
+              className="group flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-[#FAFAFA] transition-colors"
             >
-              {/* Course icon */}
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-slate-100 to-slate-50 flex items-center justify-center shrink-0">
-                <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-                </svg>
+              <div className="w-10 h-10 rounded-lg bg-[#0C0C0F] text-white flex items-center justify-center text-[0.88rem] font-semibold shrink-0">
+                {c.title.charAt(0).toUpperCase()}
               </div>
-              
+
               <div className="flex-1 min-w-0">
-                <div className="font-semibold text-slate-900 truncate group-hover:text-[#FF5533] transition-colors duration-200">{c.title}</div>
-                <div className="text-xs text-slate-400 mt-0.5">
+                <div className="text-[0.9rem] font-semibold text-[#0C0C0F] truncate group-hover:text-[#FF5533] transition-colors">{c.title}</div>
+                <div className="text-[0.74rem] text-[#94A3B8] mt-0.5">
                   {c.sections_count} section{c.sections_count !== 1 ? 's' : ''} · {c.enrolled_count} student{c.enrolled_count !== 1 ? 's' : ''}
                 </div>
               </div>
-              
+
               <div className="flex items-center gap-3 shrink-0">
-                <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${c.is_free ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600'}`}>
-                  {c.is_free ? 'Free' : 'Paid'}
-                </span>
-                <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${c.is_published ? 'text-emerald-600' : 'text-slate-400'}`}>
-                  <span className={`w-2 h-2 rounded-full ${c.is_published ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                {c.is_free ? (
+                  <span className="text-[0.66rem] font-semibold px-2 py-0.5 rounded bg-[#F1F3F5] text-[#64748B] uppercase tracking-wider">Free</span>
+                ) : (
+                  <span className="text-[0.84rem] font-semibold text-[#0C0C0F] tabular-nums">${Number(c.price).toFixed(0)}</span>
+                )}
+                <span className={`inline-flex items-center gap-1.5 text-[0.74rem] font-semibold ${c.is_published ? 'text-emerald-600' : 'text-[#94A3B8]'}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${c.is_published ? 'bg-emerald-500' : 'bg-[#CBD5E1]'}`} />
                   {c.is_published ? 'Published' : 'Draft'}
                 </span>
-                <svg className="w-5 h-5 text-slate-300 group-hover:text-slate-500 transition-colors duration-200" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 text-[#CBD5E1] group-hover:text-[#0C0C0F] transition-colors" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                 </svg>
               </div>
@@ -2404,6 +2272,453 @@ function IncomingChatRequestsSection({ token, currentUserId }: { token: string; 
   )
 }
 
+/* ── Learner Analytics helpers ── */
+
+function LearnerActivityChart({ trend }: { trend: LearnerActivityPoint[] }) {
+  const W = 720
+  const H = 180
+  const PAD_X = 12
+  const PAD_TOP = 16
+  const PAD_BOTTOM = 24
+  const max = Math.max(1, ...trend.map(t => Math.max(t.lessons_completed, t.quizzes_taken)))
+  const stepX = trend.length > 1 ? (W - PAD_X * 2) / (trend.length - 1) : 0
+  const yOf = (v: number) => PAD_TOP + (1 - v / max) * (H - PAD_TOP - PAD_BOTTOM)
+  const xOf = (i: number) => PAD_X + i * stepX
+  const lessonsPath = trend.map((t, i) => `${i === 0 ? 'M' : 'L'}${xOf(i).toFixed(1)},${yOf(t.lessons_completed).toFixed(1)}`).join(' ')
+  const lessonsArea = `${lessonsPath} L${xOf(trend.length - 1).toFixed(1)},${(H - PAD_BOTTOM).toFixed(1)} L${xOf(0).toFixed(1)},${(H - PAD_BOTTOM).toFixed(1)} Z`
+  const quizPath = trend.map((t, i) => `${i === 0 ? 'M' : 'L'}${xOf(i).toFixed(1)},${yOf(t.quizzes_taken).toFixed(1)}`).join(' ')
+  const labelEvery = Math.max(1, Math.floor(trend.length / 6))
+  const fmt = (s: string) => new Date(s).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+
+  return (
+    <div className="w-full overflow-x-auto">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-[180px] min-w-[480px]">
+        <defs>
+          <linearGradient id="learner-lessons-area" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#FF5533" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="#FF5533" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {[0.25, 0.5, 0.75, 1].map(f => (
+          <line key={f} x1={PAD_X} x2={W - PAD_X} y1={PAD_TOP + (H - PAD_TOP - PAD_BOTTOM) * f} y2={PAD_TOP + (H - PAD_TOP - PAD_BOTTOM) * f} stroke="#F1F3F5" strokeWidth="1" />
+        ))}
+        <path d={lessonsArea} fill="url(#learner-lessons-area)" />
+        <path d={lessonsPath} fill="none" stroke="#FF5533" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={quizPath} fill="none" stroke="#3B82F6" strokeWidth="2" strokeDasharray="4 4" strokeLinejoin="round" strokeLinecap="round" />
+        {trend.map((t, i) => (i % labelEvery === 0 || i === trend.length - 1) && (
+          <text key={t.date} x={xOf(i)} y={H - 6} textAnchor="middle" fontSize="9" fill="#94A3B8" fontWeight="600">{fmt(t.date)}</text>
+        ))}
+      </svg>
+    </div>
+  )
+}
+
+const LEARNER_DIFFICULTY_META: Record<string, { label: string; color: string; bg: string }> = {
+  easy:   { label: 'Easy',   color: '#10B981', bg: '#ECFDF5' },
+  medium: { label: 'Medium', color: '#F59E0B', bg: '#FFFBEB' },
+  hard:   { label: 'Hard',   color: '#EF4444', bg: '#FEF2F2' },
+}
+
+const RISK_META: Record<string, { label: string; color: string; bg: string; border: string }> = {
+  on_track:        { label: 'On track',        color: '#047857', bg: '#ECFDF5', border: '#A7F3D0' },
+  needs_attention: { label: 'Needs attention', color: '#B45309', bg: '#FFFBEB', border: '#FDE68A' },
+  at_risk:         { label: 'At risk',         color: '#B91C1C', bg: '#FEF2F2', border: '#FECACA' },
+}
+
+function learnerScoreColor(pct: number): string {
+  if (pct >= 80) return '#10B981'
+  if (pct >= 60) return '#F59E0B'
+  return '#EF4444'
+}
+
+function relTimeShort(iso: string): string {
+  const then = new Date(iso).getTime()
+  const diff = Date.now() - then
+  const m = Math.floor(diff / 60000)
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.floor(h / 24)
+  if (d < 30) return `${d}d ago`
+  const mo = Math.floor(d / 30)
+  if (mo < 12) return `${mo}mo ago`
+  return `${Math.floor(mo / 12)}y ago`
+}
+
+/* ── Learner Analytics Section ── */
+function LearnersAnalyticsSection({ token }: { token: string }) {
+  const [data, setData] = useState<LearnerAnalyticsOut | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+  const [search, setSearch] = useState('')
+  const [riskFilter, setRiskFilter] = useState<'all' | 'on_track' | 'needs_attention' | 'at_risk'>('all')
+  const [sortBy, setSortBy] = useState<'recent' | 'progress' | 'score' | 'name'>('recent')
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    setLoading(true); setErr('')
+    getLearnerAnalytics(token)
+      .then(setData)
+      .catch(e => setErr(e.message ?? 'Failed to load learner analytics'))
+      .finally(() => setLoading(false))
+  }, [token])
+
+  const toggleExpanded = (id: string) => {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="w-6 h-6 border-2 border-[#FF5533] border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  if (err) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-2xl px-6 py-8 text-center mb-8">
+        <p className="text-[0.88rem] text-red-600">{err}</p>
+      </div>
+    )
+  }
+
+  if (!data || data.total_learners === 0) {
+    return null  // fall through to MyStudentsSection's empty state
+  }
+
+  const filtered = data.learners.filter(l => {
+    if (riskFilter !== 'all' && l.risk_level !== riskFilter) return false
+    if (!search.trim()) return true
+    const q = search.toLowerCase()
+    return l.full_name.toLowerCase().includes(q) || l.email.toLowerCase().includes(q)
+  })
+
+  const sorted = [...filtered].sort((a, b) => {
+    if (sortBy === 'progress') return b.avg_progress_pct - a.avg_progress_pct
+    if (sortBy === 'score') return b.quiz_avg_pct - a.quiz_avg_pct
+    if (sortBy === 'name') return a.full_name.localeCompare(b.full_name)
+    // recent: by last_active_at desc, nulls last
+    const at = a.last_active_at ? new Date(a.last_active_at).getTime() : 0
+    const bt = b.last_active_at ? new Date(b.last_active_at).getTime() : 0
+    return bt - at
+  })
+
+  return (
+    <div className="mb-10">
+      {/* Header */}
+      <div className="flex items-end justify-between gap-4 mb-6 flex-wrap">
+        <div>
+          <h2 className="text-[1.5rem] font-black text-[#0C0C0F] tracking-tight leading-tight">Learner insights</h2>
+          <p className="text-[0.82rem] text-[#94A3B8] mt-0.5">
+            Tracking {data.total_learners} learner{data.total_learners === 1 ? '' : 's'} · {data.active_learners_30d} active in last 30d
+          </p>
+        </div>
+        <div className="hidden sm:flex items-center gap-3 text-[0.7rem] font-bold text-[#94A3B8]">
+          <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-0.5 bg-[#FF5533]" /> Lessons</span>
+          <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 border-t-[2px] border-dashed border-[#3B82F6]" /> Quizzes</span>
+        </div>
+      </div>
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <MiniStat label="Avg progress" value={`${data.avg_progress_pct}%`} hint={`${data.completed_count} done · ${data.in_progress_count} active`} accent="#FF5533" />
+        <MiniStat label="Quiz average" value={data.total_quiz_attempts > 0 ? `${data.overall_quiz_avg_pct}%` : '—'} hint={`${data.total_quiz_attempts} attempt${data.total_quiz_attempts === 1 ? '' : 's'}`} accent="#3B82F6" />
+        <MiniStat label="Pass rate" value={data.total_quiz_attempts > 0 ? `${data.overall_quiz_pass_rate}%` : '—'} hint={`${data.lessons_completed_30d} lessons in 30d`} accent="#10B981" />
+        <MiniStat label="Need follow-up" value={data.at_risk_count + data.needs_attention_count} hint={`${data.at_risk_count} at risk · ${data.needs_attention_count} attention`} accent="#EF4444" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        {/* Activity chart */}
+        <div className="lg:col-span-2 bg-white border border-[#E5E7EB] rounded-2xl px-5 py-5 shadow-[0_4px_20px_rgba(12,12,15,0.04)]">
+          <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
+            <div>
+              <p className="text-[0.7rem] font-bold text-[#94A3B8] uppercase tracking-[0.08em]">Cohort activity</p>
+              <p className="text-[1.1rem] font-black text-[#0C0C0F] leading-tight">Last 30 days</p>
+            </div>
+            <div className="flex items-end gap-5">
+              <div className="text-right">
+                <p className="text-[1.2rem] font-black text-[#FF5533] leading-none">{data.lessons_completed_30d}</p>
+                <p className="text-[0.66rem] font-semibold text-[#94A3B8] uppercase tracking-wide mt-0.5">lessons</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[1.2rem] font-black text-[#3B82F6] leading-none">{data.quizzes_taken_30d}</p>
+                <p className="text-[0.66rem] font-semibold text-[#94A3B8] uppercase tracking-wide mt-0.5">quizzes</p>
+              </div>
+            </div>
+          </div>
+          <LearnerActivityChart trend={data.activity_trend} />
+        </div>
+
+        {/* Difficulty breakdown */}
+        <div className="bg-white border border-[#E5E7EB] rounded-2xl px-5 py-5 shadow-[0_4px_20px_rgba(12,12,15,0.04)]">
+          <p className="text-[0.7rem] font-bold text-[#94A3B8] uppercase tracking-[0.08em] mb-3">Quiz performance</p>
+          {data.total_quiz_attempts > 0 ? (
+            <div className="space-y-3">
+              {(['easy', 'medium', 'hard'] as const).map(diff => {
+                const stat = data.difficulty_breakdown[diff] ?? { attempts: 0, avg_score_pct: 0, pass_rate: 0 }
+                const meta = LEARNER_DIFFICULTY_META[diff]
+                return (
+                  <div key={diff}>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[0.6rem] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: meta.bg, color: meta.color }}>{meta.label}</span>
+                        <span className="text-[0.7rem] font-semibold text-[#94A3B8]">{stat.attempts} attempt{stat.attempts === 1 ? '' : 's'}</span>
+                      </div>
+                      <span className="text-[0.78rem] font-black tabular-nums" style={{ color: stat.attempts > 0 ? learnerScoreColor(stat.avg_score_pct) : '#94A3B8' }}>
+                        {stat.attempts > 0 ? `${stat.avg_score_pct}%` : '—'}
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-[#F1F3F5] rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all duration-500" style={{ width: `${stat.attempts > 0 ? stat.avg_score_pct : 0}%`, background: meta.color }} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <p className="text-[0.78rem] font-semibold text-[#0C0C0F]">No quizzes yet</p>
+              <p className="text-[0.7rem] text-[#94A3B8] mt-0.5">Once learners take quizzes, breakdown appears here.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Top performers + needs attention */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+        <div className="bg-white border border-[#E5E7EB] rounded-2xl px-5 py-5 shadow-[0_4px_20px_rgba(12,12,15,0.04)]">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[0.78rem] font-black text-[#0C0C0F]">Top performers</p>
+            <span className="text-[0.6rem] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">By quiz avg</span>
+          </div>
+          <div className="space-y-2.5">
+            {data.top_performers.length === 0 ? (
+              <p className="text-[0.78rem] text-[#94A3B8]">No quiz data yet.</p>
+            ) : data.top_performers.map((l, i) => (
+              <div key={l.student_id} className="flex items-center gap-3">
+                <div className="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center text-[0.78rem] font-black text-emerald-700">{i + 1}</div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[0.82rem] font-bold text-[#0C0C0F] truncate">{l.full_name}</p>
+                  <p className="text-[0.66rem] text-[#94A3B8]">{l.quiz_attempts} quiz{l.quiz_attempts === 1 ? '' : 'zes'} · {l.avg_progress_pct}% progress</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-[0.95rem] font-black leading-none" style={{ color: learnerScoreColor(l.avg_quiz_pct) }}>{l.avg_quiz_pct}%</p>
+                  <p className="text-[0.6rem] font-semibold text-[#94A3B8] uppercase tracking-wide">avg</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white border border-[#E5E7EB] rounded-2xl px-5 py-5 shadow-[0_4px_20px_rgba(12,12,15,0.04)]">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[0.78rem] font-black text-[#0C0C0F]">Needs attention</p>
+            <span className="text-[0.6rem] font-bold uppercase tracking-wider text-red-700 bg-red-50 px-2 py-0.5 rounded-full">Follow up</span>
+          </div>
+          <div className="space-y-2.5">
+            {data.needs_attention.length === 0 ? (
+              <p className="text-[0.78rem] text-[#94A3B8]">All learners on track.</p>
+            ) : data.needs_attention.map(l => (
+              <div key={l.student_id} className="flex items-center gap-3">
+                <div className="w-7 h-7 rounded-lg bg-red-50 flex items-center justify-center text-red-700">
+                  <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008M12 21a9 9 0 100-18 9 9 0 000 18z" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[0.82rem] font-bold text-[#0C0C0F] truncate">{l.full_name}</p>
+                  <p className="text-[0.66rem] text-[#94A3B8]">{l.quiz_attempts > 0 ? `${l.avg_quiz_pct}% quizzes` : 'no quizzes'} · {l.avg_progress_pct}% progress</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-[0.95rem] font-black text-red-600 leading-none">{l.avg_progress_pct}%</p>
+                  <p className="text-[0.6rem] font-semibold text-[#94A3B8] uppercase tracking-wide">progress</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Per-learner board */}
+      <div className="flex items-end justify-between gap-3 mb-3 flex-wrap">
+        <h3 className="text-[1.05rem] font-black text-[#0C0C0F]">All learners</h3>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex bg-[#F1F3F5] rounded-lg p-0.5">
+            {([
+              { id: 'all', label: 'All' },
+              { id: 'on_track', label: 'On track' },
+              { id: 'needs_attention', label: 'Attention' },
+              { id: 'at_risk', label: 'At risk' },
+            ] as const).map(f => (
+              <button
+                key={f.id}
+                onClick={() => setRiskFilter(f.id)}
+                className={`px-3 h-7 rounded-md text-[0.7rem] font-bold transition ${riskFilter === f.id ? 'bg-white text-[#0C0C0F] shadow-sm' : 'text-[#94A3B8] hover:text-[#0C0C0F]'}`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value as typeof sortBy)}
+            className="h-9 px-3 pr-8 border border-[#E5E7EB] rounded-lg bg-white text-[0.74rem] font-bold text-[#0C0C0F] focus:outline-none focus:ring-2 focus:ring-[#0C0C0F]/10"
+          >
+            <option value="recent">Sort: Recent activity</option>
+            <option value="progress">Sort: Progress</option>
+            <option value="score">Sort: Quiz score</option>
+            <option value="name">Sort: Name</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="relative mb-4">
+        <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+        </svg>
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search learners by name or email..."
+          className="w-full h-11 pl-11 pr-4 bg-white border border-[#E5E7EB] rounded-xl text-[0.85rem] text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100 transition-all"
+        />
+      </div>
+
+      {sorted.length === 0 ? (
+        <div className="bg-white border border-[#E5E7EB] rounded-2xl px-6 py-10 text-center">
+          <p className="text-[0.82rem] text-[#94A3B8]">No learners match this filter.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {sorted.map((l: LearnerSummary) => {
+            const isOpen = expanded.has(l.student_id)
+            const risk = RISK_META[l.risk_level]
+            const progressColor = l.avg_progress_pct >= 75 ? '#10B981' : l.avg_progress_pct >= 25 ? '#FF5533' : '#3B82F6'
+            return (
+              <div key={l.student_id} className="bg-white border border-[#E5E7EB] rounded-2xl shadow-[0_4px_20px_rgba(12,12,15,0.04)] overflow-hidden">
+                <div className="px-5 py-4">
+                  <div className="flex items-start gap-4">
+                    <div className="w-11 h-11 shrink-0 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 text-white flex items-center justify-center text-[0.95rem] font-black">
+                      {(l.full_name || 'U').slice(0, 1).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 mb-0.5">
+                        <p className="text-[0.95rem] font-black text-[#0C0C0F] truncate">{l.full_name}</p>
+                        <span className="shrink-0 px-2 py-0.5 rounded-full text-[0.6rem] font-bold uppercase tracking-wide border" style={{ background: risk.bg, color: risk.color, borderColor: risk.border }}>{risk.label}</span>
+                      </div>
+                      <p className="text-[0.72rem] text-[#94A3B8] truncate">{l.email}</p>
+                      <div className="flex items-center gap-2 text-[0.7rem] text-[#94A3B8] flex-wrap mt-1">
+                        <span>{l.courses_enrolled} course{l.courses_enrolled === 1 ? '' : 's'}</span>
+                        <span>·</span>
+                        <span>{l.courses_completed} done · {l.courses_in_progress} active</span>
+                        {l.last_active_at ? (
+                          <>
+                            <span>·</span>
+                            <span>Active {relTimeShort(l.last_active_at)}</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>·</span>
+                            <span className="text-red-500 font-bold">Never active</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => toggleExpanded(l.student_id)}
+                      className="shrink-0 h-8 px-3 rounded-lg border border-[#E5E7EB] text-[0.72rem] font-bold text-[#0C0C0F] hover:bg-[#F8F9FA] transition"
+                    >
+                      {isOpen ? 'Hide' : 'Details'}
+                    </button>
+                  </div>
+
+                  {/* Stats grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mt-4">
+                    <div className="bg-[#F8F9FA] rounded-xl px-3 py-2.5">
+                      <p className="text-[0.6rem] font-bold text-[#94A3B8] uppercase tracking-wide mb-1">Progress</p>
+                      <p className="text-[1.05rem] font-black leading-none" style={{ color: progressColor }}>{l.avg_progress_pct}%</p>
+                    </div>
+                    <div className="bg-[#F8F9FA] rounded-xl px-3 py-2.5">
+                      <p className="text-[0.6rem] font-bold text-[#94A3B8] uppercase tracking-wide mb-1">Quizzes</p>
+                      <p className="text-[1.05rem] font-black text-[#3B82F6] leading-none">{l.quiz_attempts}</p>
+                    </div>
+                    <div className="bg-[#F8F9FA] rounded-xl px-3 py-2.5">
+                      <p className="text-[0.6rem] font-bold text-[#94A3B8] uppercase tracking-wide mb-1">Avg score</p>
+                      <p className="text-[1.05rem] font-black leading-none" style={{ color: l.quiz_attempts > 0 ? learnerScoreColor(l.quiz_avg_pct) : '#94A3B8' }}>
+                        {l.quiz_attempts > 0 ? `${l.quiz_avg_pct}%` : '—'}
+                      </p>
+                    </div>
+                    <div className="bg-[#F8F9FA] rounded-xl px-3 py-2.5">
+                      <p className="text-[0.6rem] font-bold text-[#94A3B8] uppercase tracking-wide mb-1">Pass rate</p>
+                      <p className="text-[1.05rem] font-black leading-none" style={{ color: l.quiz_attempts > 0 ? learnerScoreColor(l.quiz_pass_rate) : '#94A3B8' }}>
+                        {l.quiz_attempts > 0 ? `${l.quiz_pass_rate}%` : '—'}
+                      </p>
+                    </div>
+                    <div className="bg-[#F8F9FA] rounded-xl px-3 py-2.5">
+                      <p className="text-[0.6rem] font-bold text-[#94A3B8] uppercase tracking-wide mb-1">Active 30d</p>
+                      <p className="text-[1.05rem] font-black text-[#0C0C0F] leading-none">{l.active_days_30d}d</p>
+                    </div>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between text-[0.66rem] mb-1">
+                      <span className="text-[#94A3B8] font-semibold">Average progress</span>
+                      <span className="font-bold text-[#0C0C0F]">{l.courses_completed}/{l.courses_enrolled} completed</span>
+                    </div>
+                    <div className="h-1.5 bg-[#F1F3F5] rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${l.avg_progress_pct}%`, background: progressColor }} />
+                    </div>
+                  </div>
+                </div>
+
+                {isOpen && (
+                  <div className="border-t border-[#E5E7EB] bg-[#FAFBFC] px-5 py-4">
+                    <p className="text-[0.7rem] font-bold text-[#94A3B8] uppercase tracking-[0.08em] mb-3">Per-course breakdown</p>
+                    <div className="space-y-2">
+                      {l.courses.map(c => {
+                        const cColor = c.progress_pct >= 75 ? '#10B981' : c.progress_pct >= 25 ? '#FF5533' : '#3B82F6'
+                        return (
+                          <div key={c.course_id} className="bg-white border border-[#E5E7EB] rounded-xl px-3.5 py-3">
+                            <div className="flex items-center justify-between gap-3 mb-1.5 flex-wrap">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <p className="text-[0.85rem] font-bold text-[#0C0C0F] truncate">{c.course_title}</p>
+                                {c.enrollment_status === 'completed' && (
+                                  <span className="shrink-0 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[0.58rem] font-bold uppercase tracking-wide border border-emerald-200">Completed</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3 text-[0.7rem] text-[#94A3B8]">
+                                <span><span className="font-bold text-[#0C0C0F]">{c.completed_items}/{c.total_items}</span> lessons</span>
+                                <span>·</span>
+                                <span><span className="font-bold text-[#0C0C0F]">{c.quiz_attempts}</span> quiz{c.quiz_attempts === 1 ? '' : 'zes'}{c.quiz_attempts > 0 ? ` · ${c.quiz_avg_pct}% avg` : ''}</span>
+                              </div>
+                            </div>
+                            <div className="h-1 bg-[#F1F3F5] rounded-full overflow-hidden">
+                              <div className="h-full rounded-full" style={{ width: `${c.progress_pct}%`, background: cColor }} />
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ── My Students Section ── */
 function MyStudentsSection({ token }: { token: string }) {
   const [data, setData] = useState<CourseStudentsOut[]>([])
@@ -2567,109 +2882,295 @@ function MyLearningSection({ token }: { token: string }) {
   const navigate = useNavigate()
   const [enrolled, setEnrolled] = useState<CourseOut[]>([])
   const [loading, setLoading] = useState(true)
+  const [selected, setSelected] = useState<CourseOut | null>(null)
   const [confirmUnenroll, setConfirmUnenroll] = useState<string | null>(null)
   const [unenrolling, setUnenrolling] = useState(false)
   const [unenrollErr, setUnenrollErr] = useState('')
+  const [expandedSection, setExpandedSection] = useState<string | null>(null)
+  const [expandedMaterial, setExpandedMaterial] = useState<string | null>(null)
 
   useEffect(() => {
     setLoading(true)
-    getEnrolledCourses(token).then(setEnrolled).finally(() => setLoading(false))
+    getEnrolledCourses(token).then(c => {
+      setEnrolled(c)
+      if (c.length > 0 && c[0].sections.length > 0) setExpandedSection(c[0].sections[0].id)
+    }).finally(() => setLoading(false))
   }, [token])
 
   const handleUnenroll = async (courseId: string) => {
-    setUnenrolling(true); setUnenrollErr('')
+    setUnenrolling(true)
+    setUnenrollErr('')
     try {
       await unenrollFromCourse(token, courseId)
       setEnrolled(prev => prev.filter(c => c.id !== courseId))
       setConfirmUnenroll(null)
+      if (selected?.id === courseId) setSelected(null)
     } catch (e: any) {
-      setUnenrollErr(e.message || 'Could not remove course')
+      setUnenrollErr(e.message)
     } finally {
       setUnenrolling(false)
     }
   }
 
-  return (
-    <div className="max-w-[800px] animate-fadeIn">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-slate-900 tracking-tight">My Learning</h2>
-        <p className="text-sm text-slate-500 mt-1">Courses you're enrolled in as a learner</p>
-      </div>
+  const typeConfig: Record<string, { icon: ReactNode; color: string; bg: string; label: string }> = {
+    pdf: {
+      icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>,
+      color: 'text-blue-600', bg: 'bg-blue-50', label: 'PDF',
+    },
+    video: {
+      icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" /></svg>,
+      color: 'text-purple-600', bg: 'bg-purple-50', label: 'VIDEO',
+    },
+    audio: {
+      icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" /></svg>,
+      color: 'text-emerald-600', bg: 'bg-emerald-50', label: 'AUDIO',
+    },
+    exercise: {
+      icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>,
+      color: 'text-amber-600', bg: 'bg-amber-50', label: 'EXERCISE',
+    },
+  }
 
-      {unenrollErr && (
-        <div className="mb-4 px-4 py-2.5 rounded-lg text-sm text-red-600 bg-red-50 border border-red-200">{unenrollErr}</div>
-      )}
+  if (selected) {
+    return (
+      <div className="max-w-[820px] animate-fadeIn">
+        <button onClick={() => setSelected(null)}
+          className="group inline-flex items-center gap-2 text-[0.82rem] font-semibold text-[#64748B] hover:text-[#0C0C0F] mb-6 bg-transparent border-none cursor-pointer p-0 transition-colors">
+          <svg className="w-4 h-4 transition-transform duration-200 group-hover:-translate-x-0.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          Back to my learning
+        </button>
 
-      {loading ? (
-        <div className="space-y-4">
-          {[...Array(3)].map((_, i) => <div key={i} className="h-24 rounded-2xl skeleton" />)}
-        </div>
-      ) : enrolled.length === 0 ? (
-        <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-200">
-          <div className="w-14 h-14 mx-auto mb-4 bg-slate-100 rounded-2xl flex items-center justify-center">
-            <svg className="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5" />
-            </svg>
+        <div className="bg-white rounded-xl border border-[#E5E7EB] overflow-hidden mb-5">
+          {selected.thumbnail ? (
+            <div className="aspect-[16/6] bg-[#F1F3F5] overflow-hidden">
+              <img src={`http://localhost:8000/uploads/${selected.thumbnail}`} alt={selected.title} className="w-full h-full object-cover" />
+            </div>
+          ) : null}
+
+          <div className="p-6">
+            <p className="text-[0.62rem] font-bold tracking-[0.14em] uppercase text-[#94A3B8] mb-2">Enrolled course</p>
+            <h2 className="text-[1.4rem] font-semibold text-[#0C0C0F] tracking-[-0.02em] leading-tight mb-2">{selected.title}</h2>
+            <div className="flex items-center gap-3 text-[0.8rem] text-[#64748B]">
+              <span className="w-6 h-6 rounded-full bg-[#0C0C0F] text-white flex items-center justify-center text-[0.66rem] font-semibold">
+                {selected.professor_name.charAt(0).toUpperCase()}
+              </span>
+              <span>{selected.professor_name}</span>
+              <span className="text-[#CBD5E1]">·</span>
+              <span>{selected.sections_count} section{selected.sections_count !== 1 ? 's' : ''}</span>
+            </div>
+
+            {selected.description && (
+              <p className="text-[0.86rem] text-[#64748B] leading-relaxed mt-4">{selected.description}</p>
+            )}
+
+            <div className="mt-6 flex flex-wrap items-center gap-2">
+              <button onClick={() => navigate(`/learn/${selected.id}`)}
+                className="inline-flex items-center gap-2 h-10 px-5 bg-[#0C0C0F] text-white rounded-lg text-[0.84rem] font-semibold hover:bg-[#1E1E23] transition-colors border-none cursor-pointer">
+                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+                Start learning
+              </button>
+              {confirmUnenroll === selected.id ? (
+                <div className="flex items-center gap-2">
+                  <button onClick={() => handleUnenroll(selected.id)} disabled={unenrolling}
+                    className="h-10 px-4 text-[0.8rem] font-semibold text-white bg-red-500 hover:bg-red-600 rounded-lg border-none cursor-pointer disabled:opacity-50 transition-colors">
+                    {unenrolling ? 'Removing…' : 'Confirm remove'}
+                  </button>
+                  <button onClick={() => { setConfirmUnenroll(null); setUnenrollErr('') }}
+                    className="h-10 px-3 text-[0.8rem] font-semibold text-[#64748B] bg-white border border-[#E5E7EB] hover:border-[#0C0C0F] rounded-lg cursor-pointer transition-colors">
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => setConfirmUnenroll(selected.id)}
+                  className="inline-flex items-center gap-1.5 h-10 px-4 text-[0.82rem] font-semibold text-[#64748B] bg-white border border-[#E5E7EB] hover:border-[#0C0C0F] hover:text-[#0C0C0F] rounded-lg cursor-pointer transition-colors">
+                  Unenroll
+                </button>
+              )}
+              {unenrollErr && <p className="text-xs text-red-500 ml-2">{unenrollErr}</p>}
+            </div>
           </div>
-          <p className="text-base font-semibold text-slate-900 mb-1">Not enrolled in any course yet</p>
-          <p className="text-sm text-slate-500">Browse the catalog and enroll to keep learning alongside teaching</p>
         </div>
-      ) : (
-        <div className="space-y-3 stagger-children">
-          {enrolled.map(c => (
-            <div key={c.id}
-              onClick={() => navigate(`/learn/${c.id}`)}
-              className="group bg-white rounded-2xl border border-slate-200/80 p-5 cursor-pointer shadow-[0_2px_12px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.1)] hover:border-slate-300 hover:-translate-y-0.5 transition-all duration-300">
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-slate-100 to-slate-50 flex items-center justify-center shrink-0 overflow-hidden">
-                  {c.thumbnail ? (
-                    <img src={`http://localhost:8000/uploads/${c.thumbnail}`} alt={c.title} className="w-full h-full object-cover" />
-                  ) : (
-                    <svg className="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+
+        {selected.sections.length === 0 ? (
+          <div className="text-center py-14 bg-white rounded-xl border border-dashed border-[#E5E7EB]">
+            <p className="text-[0.88rem] font-medium text-[#0C0C0F] mb-1">No content yet</p>
+            <p className="text-[0.78rem] text-[#94A3B8]">The instructor hasn't added any materials.</p>
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {selected.sections.map((section, idx) => {
+              const isOpen = expandedSection === section.id
+              return (
+                <div key={section.id} className="bg-white rounded-xl border border-[#E5E7EB] overflow-hidden">
+                  <button
+                    onClick={() => setExpandedSection(isOpen ? null : section.id)}
+                    className="w-full px-5 py-4 flex items-center gap-3 hover:bg-[#FAFAFA] transition-colors cursor-pointer bg-transparent border-none"
+                  >
+                    <span className={`w-7 h-7 rounded-md flex items-center justify-center text-[0.78rem] font-semibold shrink-0 transition-colors ${isOpen ? 'bg-[#0C0C0F] text-white' : 'bg-[#F1F3F5] text-[#64748B]'}`}>
+                      {idx + 1}
+                    </span>
+                    <span className="font-semibold text-[#0C0C0F] flex-1 text-left text-[0.88rem]">{section.title}</span>
+                    <span className="text-[0.7rem] text-[#94A3B8] shrink-0">
+                      {section.subsections.length + section.materials.length} item{(section.subsections.length + section.materials.length) !== 1 ? 's' : ''}
+                    </span>
+                    <svg className={`w-4 h-4 text-[#94A3B8] transition-transform shrink-0 ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
                     </svg>
+                  </button>
+
+                  {isOpen && (section.subsections.length > 0 || section.materials.length > 0) && (
+                    <div className="border-t border-[#F1F3F5]">
+                      {section.subsections.map((sub, subIdx) => (
+                        <div key={sub.id} className={subIdx > 0 ? 'border-t border-[#F1F3F5]' : ''}>
+                          <div className="flex items-center gap-4 px-5 py-3.5">
+                            <div className="w-8 h-8 rounded-md bg-[#F1F3F5] flex items-center justify-center shrink-0">
+                              <svg className="w-4 h-4 text-[#64748B]" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                              </svg>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[0.85rem] font-medium text-[#0C0C0F] truncate">{sub.title}</div>
+                              <div className="text-[0.66rem] font-semibold uppercase tracking-[0.08em] mt-0.5 text-[#94A3B8]">Lesson</div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      {section.materials.map((m, mIdx) => {
+                        const cfg = typeConfig[m.type] ?? { icon: null, color: 'text-[#64748B]', bg: 'bg-[#F1F3F5]', label: m.type.toUpperCase() }
+                        return (
+                          <div key={m.id} className={mIdx > 0 || section.subsections.length > 0 ? 'border-t border-[#F1F3F5]' : ''}>
+                            <div className="flex items-center gap-4 px-5 py-3.5">
+                              <div className={`w-8 h-8 rounded-md ${cfg.bg} flex items-center justify-center shrink-0`}>
+                                <span className={cfg.color}>{cfg.icon}</span>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[0.85rem] font-medium text-[#0C0C0F] truncate">{m.title}</div>
+                                <div className={`text-[0.66rem] font-semibold uppercase tracking-[0.08em] mt-0.5 ${cfg.color}`}>{cfg.label}</div>
+                              </div>
+                              {m.type === 'pdf' && m.content_text && (
+                                <button
+                                  onClick={() => setExpandedMaterial(expandedMaterial === m.id ? null : m.id)}
+                                  className="h-8 px-3 text-[0.74rem] font-semibold text-[#0C0C0F] bg-white border border-[#E5E7EB] hover:border-[#0C0C0F] rounded-lg transition-colors cursor-pointer whitespace-nowrap">
+                                  {expandedMaterial === m.id ? 'Close' : 'Read'}
+                                </button>
+                              )}
+                            </div>
+                            {expandedMaterial === m.id && m.content_text && (
+                              <div className="px-6 py-5 bg-[#FAFAFA] border-t border-[#F1F3F5]">
+                                <div className="prose-sm max-w-none text-[#0C0C0F] leading-relaxed [&>h1]:text-xl [&>h1]:font-bold [&>h1]:mb-3 [&>h2]:text-lg [&>h2]:font-semibold [&>h2]:mb-2 [&>h3]:text-base [&>h3]:font-semibold [&>h3]:mb-1.5 [&>p]:mb-3 [&>p]:text-[0.875rem] [&>ul]:list-disc [&>ul]:pl-5 [&>ul]:mb-3 [&>ol]:list-decimal [&>ol]:pl-5 [&>ol]:mb-3 [&>li]:mb-1">
+                                  <Markdown>{m.content_text}</Markdown>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
                   )}
                 </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    )
+  }
 
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold text-slate-900 truncate group-hover:text-[#FF5533] transition-colors duration-200">{c.title}</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">by {c.professor_name}</p>
-                </div>
+  return (
+    <div className="max-w-[1080px] animate-fadeIn">
+      <div className="mb-8 flex items-end justify-between flex-wrap gap-4">
+        <div>
+          <h2 className="text-[1.6rem] font-semibold tracking-[-0.02em] text-[#0C0C0F]">My learning</h2>
+          <p className="text-[0.86rem] text-[#64748B] mt-1">Courses you're enrolled in as a learner.</p>
+        </div>
+        <span className="text-[0.74rem] font-semibold text-[#64748B] bg-white border border-[#E5E7EB] rounded-md px-2.5 py-1">
+          {enrolled.length} course{enrolled.length !== 1 ? 's' : ''}
+        </span>
+      </div>
 
-                <div className="text-right shrink-0 flex items-center gap-3">
-                  <div>
-                    <div className="text-xs text-slate-400">{c.sections_count} section{c.sections_count !== 1 ? 's' : ''}</div>
-                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 mt-0.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                      Active
-                    </span>
+      {loading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="h-64 rounded-xl skeleton" />
+          ))}
+        </div>
+      ) : enrolled.length === 0 ? (
+        <div className="text-center py-20 bg-white rounded-xl border border-dashed border-[#E5E7EB]">
+          <p className="text-[1rem] font-semibold text-[#0C0C0F] mb-1">Not enrolled in any course yet</p>
+          <p className="text-[0.86rem] text-[#64748B]">Browse the catalog and enroll to keep learning alongside teaching.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 stagger-children">
+          {enrolled.map(c => (
+            <div key={c.id} className="group bg-white rounded-xl border border-[#E5E7EB] overflow-hidden flex flex-col transition-all hover:border-[#0C0C0F] hover:shadow-[0_8px_24px_rgba(12,12,15,0.06)]">
+              <div
+                className="relative aspect-[16/9] cursor-pointer overflow-hidden bg-[#0C0C0F]"
+                onClick={async () => { const full = await getCourseDetail(c.id); setSelected(full) }}
+              >
+                {c.thumbnail ? (
+                  <img src={`http://localhost:8000/uploads/${c.thumbnail}`} alt={c.title}
+                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03]" />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-white/90 text-[2.5rem] font-semibold tracking-tight">{c.title.charAt(0).toUpperCase()}</span>
                   </div>
+                )}
+
+                <div className="absolute top-2.5 right-2.5" onClick={e => e.stopPropagation()}>
                   {confirmUnenroll === c.id ? (
-                    <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-                      <button
-                        onClick={() => handleUnenroll(c.id)}
-                        disabled={unenrolling}
-                        className="px-2.5 py-1 text-[11px] font-semibold text-white bg-red-500 hover:bg-red-600 rounded-lg border-none cursor-pointer disabled:opacity-50 transition-colors duration-200"
-                      >{unenrolling ? '...' : 'Remove'}</button>
-                      <button
-                        onClick={() => setConfirmUnenroll(null)}
-                        className="px-2.5 py-1 text-[11px] font-semibold text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-lg border-none cursor-pointer transition-colors duration-200"
-                      >No</button>
+                    <div className="flex items-center gap-1 bg-white rounded-lg shadow-md p-1 border border-[#E5E7EB]">
+                      <button onClick={() => handleUnenroll(c.id)} disabled={unenrolling}
+                        className="px-2 py-1 text-[0.68rem] font-semibold text-white bg-red-500 hover:bg-red-600 rounded-md border-none cursor-pointer transition-colors">
+                        {unenrolling ? '…' : 'Remove'}
+                      </button>
+                      <button onClick={() => setConfirmUnenroll(null)}
+                        className="px-2 py-1 text-[0.68rem] font-semibold text-[#64748B] bg-[#F1F3F5] hover:bg-[#E5E7EB] rounded-md border-none cursor-pointer transition-colors">
+                        Cancel
+                      </button>
                     </div>
                   ) : (
-                    <button
-                      onClick={e => { e.stopPropagation(); setConfirmUnenroll(c.id) }}
-                      className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-red-400 hover:bg-red-50 border-none bg-transparent cursor-pointer transition-all duration-200"
-                      title="Unenroll from this course"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <button onClick={() => setConfirmUnenroll(c.id)}
+                      className="w-7 h-7 rounded-md bg-white/90 backdrop-blur-sm flex items-center justify-center text-[#64748B] hover:text-red-500 border-none cursor-pointer transition-colors opacity-0 group-hover:opacity-100"
+                      title="Remove course">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                       </svg>
                     </button>
                   )}
-                  <svg className="w-5 h-5 text-slate-300 group-hover:text-slate-500 transition-colors duration-200" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                  </svg>
+                </div>
+              </div>
+
+              <div className="p-4 flex flex-col flex-1">
+                <h3
+                  className="text-[0.92rem] font-semibold text-[#0C0C0F] leading-snug mb-1.5 line-clamp-2 cursor-pointer group-hover:text-[#FF5533] transition-colors"
+                  onClick={async () => { const full = await getCourseDetail(c.id); setSelected(full) }}
+                >{c.title}</h3>
+                <p className="text-[0.76rem] text-[#94A3B8] truncate mb-4">{c.professor_name}</p>
+
+                <p className="mb-4 text-[0.72rem] text-[#94A3B8]">{c.sections_count} section{c.sections_count !== 1 ? 's' : ''}</p>
+
+                <div className="mt-auto flex items-center gap-2">
+                  <button
+                    onClick={() => navigate(`/learn/${c.id}`)}
+                    className="flex-1 h-9 bg-[#0C0C0F] text-white text-[0.78rem] font-semibold rounded-lg hover:bg-[#1E1E23] transition-colors flex items-center justify-center gap-1.5 border-none cursor-pointer">
+                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                      <polygon points="5 3 19 12 5 21 5 3" />
+                    </svg>
+                    Continue
+                  </button>
+                  <button
+                    onClick={async () => { const full = await getCourseDetail(c.id); setSelected(full) }}
+                    className="h-9 w-9 bg-white text-[#64748B] hover:text-[#0C0C0F] border border-[#E5E7EB] hover:border-[#0C0C0F] rounded-lg transition-colors flex items-center justify-center cursor-pointer"
+                    title="Course details">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v.01M12 12v6" />
+                      <circle cx="12" cy="12" r="9" />
+                    </svg>
+                  </button>
                 </div>
               </div>
             </div>
@@ -3275,8 +3776,13 @@ export default function ProfessorDashboard() {
       </div>
 
       {/* ── Students ── */}
-      <div className={nav !== 'students' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
-        {mounted.has('students') && <MyStudentsSection token={token!} />}
+      <div className={nav !== 'students' ? 'hidden' : 'max-w-[1200px] mx-auto px-6 md:px-10 py-8'}>
+        {mounted.has('students') && (
+          <>
+            <LearnersAnalyticsSection token={token!} />
+            <MyStudentsSection token={token!} />
+          </>
+        )}
       </div>
 
       {/* ── Chat ── */}
@@ -3320,92 +3826,80 @@ export default function ProfessorDashboard() {
       )}
 
       {/* ── Home ── */}
-      <div className={nav !== 'home' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
+      <div className={nav !== 'home' ? 'hidden' : 'max-w-[1080px] mx-auto px-6 md:px-10 py-10'}>
 
-        {/* Hero */}
-        <div className="mb-10 relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#0F172A] via-[#111827] to-[#0B0F1F] text-white shadow-[0_25px_80px_rgba(15,23,42,0.35)] border border-white/10">
-          <div className="absolute -right-12 -top-12 w-48 h-48 bg-[#FF5533]/20 blur-3xl rounded-full" />
-          <div className="absolute -left-14 bottom-0 w-64 h-64 bg-[#22D3EE]/10 blur-3xl rounded-full" />
-          <div className="relative p-6 sm:p-8 flex flex-col gap-6">
-            <div className="flex flex-wrap items-start justify-between gap-6">
-              <div>
-                <p className="text-[0.7rem] font-bold tracking-[0.16em] uppercase text-white/70 mb-1">Professor workspace</p>
-                <h1 className="text-[1.9rem] font-black tracking-[-0.03em] leading-tight">Welcome back, {firstName || 'professor'}</h1>
-                <p className="text-white/70 text-[0.95rem] max-w-xl mt-2">
-                  Launch polished courses, track engagement, and keep students focused in a calmer dashboard.
-                </p>
-                {/* Affiliation badge */}
-                {user?.university_name ? (
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-white/80 text-[0.72rem] font-semibold">
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-                      </svg>
-                      {user.university_name}
-                    </span>
-                    {user.region_name && (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-white/60 text-[0.72rem] font-semibold">
-                        {user.region_name}
-                      </span>
-                    )}
-                  </div>
-                ) : (
-                  <div className="mt-3">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-white/40 text-[0.72rem] font-semibold">
-                      Independent professor
-                    </span>
-                  </div>
+        {/* Header */}
+        <div className="mb-10 flex flex-wrap items-end justify-between gap-6">
+          <div>
+            <p className="text-[0.66rem] font-bold tracking-[0.18em] uppercase text-[#FF5533] mb-2.5">Professor workspace</p>
+            <h1 className="text-[1.85rem] sm:text-[2.1rem] font-semibold tracking-[-0.025em] leading-[1.1] text-[#0C0C0F]">
+              Welcome back, {firstName || 'professor'}.
+            </h1>
+            <p className="text-[#64748B] text-[0.92rem] mt-2.5 max-w-xl leading-relaxed">
+              Build courses, track engagement, and keep your students moving forward.
+            </p>
+            {user?.university_name ? (
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-3 h-7 rounded-full bg-white border border-[#E5E7EB] text-[#0C0C0F] text-[0.72rem] font-semibold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#FF5533]" />
+                  {user.university_name}
+                </span>
+                {user.region_name && (
+                  <span className="inline-flex items-center px-3 h-7 rounded-full bg-white border border-[#E5E7EB] text-[#64748B] text-[0.72rem] font-semibold">
+                    {user.region_name}
+                  </span>
                 )}
               </div>
-              <div className="flex flex-wrap gap-3">
-                <button
-                  onClick={() => setNav('my-courses')}
-                  className="h-11 px-5 rounded-xl bg-white text-[#0C0C0F] font-semibold text-[0.9rem] border-none cursor-pointer shadow-md hover:-translate-y-0.5 transition-all"
-                >
-                  + New course
-                </button>
-                <button
-                  onClick={() => setNav('courses')}
-                  className="h-11 px-5 rounded-xl border border-white/40 text-white/90 font-semibold text-[0.9rem] bg-white/10 backdrop-blur cursor-pointer hover:border-white/70 transition-all"
-                >
-                  Browse catalog
-                </button>
+            ) : (
+              <div className="mt-4">
+                <span className="inline-flex items-center px-3 h-7 rounded-full bg-white border border-[#E5E7EB] text-[#94A3B8] text-[0.72rem] font-semibold">
+                  Independent professor
+                </span>
               </div>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {[
-                { label: 'Enrolled students', value: String(homeStats.students) },
-                { label: 'My courses', value: String(homeStats.courses) },
-                { label: 'Published', value: String(homeStats.published) },
-              ].map(s => (
-                <div key={s.label} className="rounded-xl bg-white/10 border border-white/15 backdrop-blur px-4 py-3 shadow-inner flex items-center justify-between">
-                  <div>
-                    <p className="text-[0.72rem] font-bold uppercase tracking-[0.12em] text-white/70">{s.label}</p>
-                    <p className="text-[1.35rem] font-black tracking-tight">{s.value}</p>
-                  </div>
-                  <span className="w-2 h-2 rounded-full bg-white/70" />
-                </div>
-              ))}
-            </div>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2.5">
+            <button
+              onClick={() => setNav('my-courses')}
+              className="h-10 px-5 rounded-lg bg-[#0C0C0F] text-white font-semibold text-[0.84rem] border-none cursor-pointer hover:bg-[#1E1E23] transition-colors"
+            >
+              + New course
+            </button>
+            <button
+              onClick={() => setNav('courses')}
+              className="h-10 px-5 rounded-lg border border-[#E5E7EB] bg-white text-[#0C0C0F] font-semibold text-[0.84rem] cursor-pointer hover:border-[#0C0C0F] transition-colors"
+            >
+              Browse catalog
+            </button>
           </div>
         </div>
 
-        {/* Verification banner — only for unverified professors */}
-        {user?.is_verified === false && <VerificationBanner token={token!} />}
+        {/* Stats strip */}
+        <div className="mb-10 grid grid-cols-1 sm:grid-cols-3 gap-px bg-[#E5E7EB] rounded-xl overflow-hidden border border-[#E5E7EB]">
+          {[
+            { label: 'Enrolled students', value: homeStats.students },
+            { label: 'My courses', value: homeStats.courses },
+            { label: 'Published', value: homeStats.published },
+          ].map(s => (
+            <div key={s.label} className="bg-white px-5 py-5">
+              <p className="text-[1.65rem] font-semibold tracking-tight text-[#0C0C0F] leading-none tabular-nums">{s.value}</p>
+              <p className="text-[0.66rem] font-bold tracking-[0.12em] uppercase text-[#94A3B8] mt-2.5">{s.label}</p>
+            </div>
+          ))}
+        </div>
 
         {/* University affiliation */}
-        <div className="mb-8">
+        <div className="mb-10">
           <UniversityCard token={token!} />
         </div>
 
         {/* Activity */}
-        <div className="bg-white border border-[#E5E7EB] rounded-xl shadow-[0_16px_44px_rgba(12,12,15,0.06)]">
-          <h2 className="text-[0.68rem] font-bold tracking-[0.12em] uppercase text-[#94A3B8] mb-1 px-5 pt-5">Recent activity</h2>
-          <div className="flex flex-col">
+        <div>
+          <h2 className="text-[0.66rem] font-bold tracking-[0.14em] uppercase text-[#94A3B8] mb-4">Recent activity</h2>
+          <div className="bg-white border border-[#E5E7EB] rounded-xl divide-y divide-[#F1F3F5] overflow-hidden">
             {ACTIVITY.map((a, i) => (
-              <div key={i}
-                className={`flex items-start gap-3 px-5 py-4 ${i !== ACTIVITY.length - 1 ? 'border-t border-[#F1F3F5]' : 'border-t border-[#F1F3F5]'}`}>
-                <div className="w-9 h-9 rounded-full bg-[#F1F3F5] text-[#94A3B8] flex items-center justify-center text-[0.72rem] font-bold uppercase shrink-0">
+              <div key={i} className="flex items-start gap-3 px-5 py-4">
+                <div className="w-9 h-9 rounded-full bg-[#F1F3F5] text-[#64748B] flex items-center justify-center text-[0.7rem] font-semibold uppercase shrink-0">
                   {a.student.split(' ').map(w => w[0]).join('')}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -3414,7 +3908,7 @@ export default function ProfessorDashboard() {
                     <span className="font-semibold">{a.course}</span>
                   </p>
                 </div>
-                <span className="text-[0.72rem] text-[#94A3B8] shrink-0">{a.time}</span>
+                <span className="text-[0.72rem] text-[#94A3B8] shrink-0 mt-0.5">{a.time}</span>
               </div>
             ))}
           </div>

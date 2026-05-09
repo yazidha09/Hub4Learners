@@ -26,7 +26,6 @@ def get_platform_stats(db: Session) -> dict:
     total_students = db.query(User).filter(User.role == "student").count()
     total_professors = db.query(User).filter(User.role == "professor").count()
     total_university_admins = db.query(User).filter(User.role == "university_admin").count()
-    total_regional_admins = db.query(User).filter(User.role == "regional_admin").count()
     total_super_admins = db.query(User).filter(User.role == "super_admin").count()
     total_courses = db.query(Course).count()
     published_courses = db.query(Course).filter(Course.is_published == True).count()  # noqa: E712
@@ -36,10 +35,9 @@ def get_platform_stats(db: Session) -> dict:
         "total_students": total_students,
         "total_professors": total_professors,
         "total_university_admins": total_university_admins,
-        "total_regional_admins": total_regional_admins,
         "total_super_admins": total_super_admins,
         # kept for frontend backward compat
-        "total_admins": total_university_admins + total_regional_admins + total_super_admins,
+        "total_admins": total_university_admins + total_super_admins,
         "total_courses": total_courses,
         "published_courses": published_courses,
         "total_enrollments": total_enrollments,
@@ -61,13 +59,6 @@ def list_users(
         uni_id = actor.get("university_id")
         if uni_id:
             query = query.filter(User.university_id == UUID(uni_id))
-        else:
-            return []
-    # regional_admin only sees users from their region
-    elif actor["role"] == "regional_admin":
-        region_id = actor.get("region_id")
-        if region_id:
-            query = query.filter(User.region_id == UUID(region_id))
         else:
             return []
 
@@ -131,9 +122,6 @@ def change_user_role(
     if actor["role"] == "university_admin":
         if str(user.university_id) != actor.get("university_id"):
             raise HTTPException(status_code=403, detail="User is not in your university")
-    elif actor["role"] == "regional_admin":
-        if str(user.region_id) != actor.get("region_id"):
-            raise HTTPException(status_code=403, detail="User is not in your region")
 
     user.role = new_role
     db.commit()

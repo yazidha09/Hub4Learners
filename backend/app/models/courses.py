@@ -20,6 +20,10 @@ class Course(SQLModel, table=True):
     professor_id: UUID = Field(sa_column=Column(ForeignKey("users.id"), nullable=False, index=True))
     category_id: Optional[UUID] = Field(default=None, sa_column=Column(ForeignKey("categories.id"), nullable=True, index=True))
     is_published: bool = Field(sa_column=Column(Boolean, nullable=False, default=False))
+    ai_summary: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    ai_summary_generated_at: Optional[datetime] = Field(
+        default=None, sa_column=Column(DateTime, nullable=True)
+    )
     created_at: datetime = Field(
         sa_column=Column(DateTime, nullable=False, server_default=func.current_timestamp())
     )

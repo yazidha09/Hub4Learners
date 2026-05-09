@@ -1,5 +1,12 @@
 import os
 
+from dotenv import load_dotenv
+
+# Load .env BEFORE importing any submodules that capture env vars at import
+# time (e.g. app.utils.rag reads gemini_api_key / Pinecone_api_key at module
+# scope). Without this, those modules see None and silently fail.
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -17,7 +24,6 @@ from app.models.enrollment import Enrollment    # noqa: F401
 from app.models.chat_request import ChatRequest  # noqa: F401
 from app.models.message import Message          # noqa: F401
 from app.models.university_join_request import UniversityJoinRequest  # noqa: F401
-from app.models.professor_verification import ProfessorVerificationRequest  # noqa: F401
 from app.models.friendship import Friendship          # noqa: F401
 from app.models.friend_message import FriendMessage   # noqa: F401
 from app.models.notification import Notification      # noqa: F401
@@ -27,6 +33,7 @@ from app.models.course_subsection import CourseSubsection  # noqa: F401
 from app.models.announcement import Announcement            # noqa: F401
 from app.models.course_progress import CourseProgress      # noqa: F401
 from app.models.course_feedback import CourseFeedback      # noqa: F401
+from app.models.qcm_attempt import QCMAttempt              # noqa: F401
 from app.controller.category_controller import seed_categories
 from app.routes.auth_routes import router as auth_router
 from app.routes.course_routes import router as course_router
@@ -34,13 +41,13 @@ from app.routes.category_routes import router as category_router
 from app.routes.admin_routes import router as admin_router
 from app.routes.chat_routes import router as chat_router
 from app.routes.org_routes import router as org_router
-from app.routes.prof_verification_routes import router as prof_verification_router
 from app.routes.ai_routes import router as ai_router
 from app.routes.friend_routes import router as friend_router
 from app.routes.notification_routes import router as notification_router
 from app.routes.ws_routes import router as ws_router
 from app.routes.course_generation_routes import router as course_gen_router
 from app.routes.announcement_routes import router as announcement_router
+from app.routes.payment_routes import router as payment_router
 
 app = FastAPI()
 
@@ -60,6 +67,27 @@ app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 @app.on_event("startup")
 def on_startup():
+    # Sanity-check RAG config so misconfigured envs surface in the boot log
+    # instead of failing silently inside a daemon thread.
+    gem = os.getenv("gemini_api_key")
+    pc = os.getenv("Pinecone_api_key")
+    print(
+        f"[BOOT] RAG config: gemini_api_key={'SET' if gem else 'MISSING'}, "
+        f"Pinecone_api_key={'SET' if pc else 'MISSING'}, "
+        f"PINECONE_INDEX={os.getenv('PINECONE_INDEX', 'hub4learners')}"
+    )
+    if not (gem and pc):
+        print("[BOOT] ⚠ RAG indexing/search will NOT work until both keys are set in backend/.env")
+
+    sk = os.getenv("Stripe_secret_key")
+    pk = os.getenv("Stripe_publishable_key")
+    print(
+        f"[BOOT] Stripe config: secret={'SET' if sk else 'MISSING'}, "
+        f"publishable={'SET' if pk else 'MISSING'}"
+    )
+    if not (sk and pk):
+        print("[BOOT] ⚠ Paid course checkout will NOT work until both Stripe keys are set in backend/.env")
+
     SQLModel.metadata.create_all(engine)
 
     import sqlalchemy as sa
@@ -70,6 +98,8 @@ def on_startup():
             "ALTER TABLE courses ADD COLUMN IF NOT EXISTS category_id UUID REFERENCES categories(id) ON DELETE SET NULL",
             "ALTER TABLE courses ADD COLUMN IF NOT EXISTS price NUMERIC(10,2) NOT NULL DEFAULT 0.00",
             "ALTER TABLE courses ADD COLUMN IF NOT EXISTS is_subscription BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE courses ADD COLUMN IF NOT EXISTS ai_summary TEXT",
+            "ALTER TABLE courses ADD COLUMN IF NOT EXISTS ai_summary_generated_at TIMESTAMP",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS auto_refuse_chat BOOLEAN NOT NULL DEFAULT FALSE",
             # ── If the role column is a PG enum, convert it to plain VARCHAR
             # so new role strings are accepted without altering the enum type.
@@ -104,7 +134,7 @@ def on_startup():
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
-            # ── Professor verification column + table ─────────────────────────
+            # ── is_verified column kept (always defaults true; no admin gate)
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN NOT NULL DEFAULT TRUE",
             # ── Friendships + friend messages ─────────────────────────────────
             """
@@ -149,22 +179,8 @@ def on_startup():
             """,
             "CREATE INDEX IF NOT EXISTS ix_notifications_user_id ON notifications(user_id)",
             "CREATE INDEX IF NOT EXISTS ix_notifications_user_read ON notifications(user_id, is_read)",
-            """
-            CREATE TABLE IF NOT EXISTS professor_verification_requests (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                professor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                region_id UUID NOT NULL REFERENCES regions(id) ON DELETE CASCADE,
-                birth_date DATE NOT NULL,
-                first_name VARCHAR(255) NOT NULL,
-                father_name VARCHAR(255) NOT NULL,
-                grandfather_name VARCHAR(255) NOT NULL,
-                status VARCHAR(20) NOT NULL DEFAULT 'pending',
-                note TEXT,
-                reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
-                reviewed_at TIMESTAMP,
-                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """,
+            # ── Demote any leftover regional_admin rows to university_admin ───
+            "UPDATE users SET role = 'university_admin' WHERE role = 'regional_admin'",
             # ── Convert material_type enum → VARCHAR so 'lesson' type is accepted
             """
             DO $$
@@ -266,6 +282,25 @@ def on_startup():
             )
             """,
             "CREATE INDEX IF NOT EXISTS ix_course_feedback_course ON course_feedback(course_id)",
+            # ── QCM attempts ──────────────────────────────────────────────────
+            """
+            CREATE TABLE IF NOT EXISTS qcm_attempts (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                student_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+                section_id UUID REFERENCES course_sections(id) ON DELETE SET NULL,
+                difficulty VARCHAR(16) NOT NULL,
+                score INTEGER NOT NULL,
+                total INTEGER NOT NULL,
+                passed BOOLEAN NOT NULL DEFAULT FALSE,
+                questions_json TEXT NOT NULL,
+                answers_json TEXT NOT NULL,
+                completed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_qcm_attempts_student ON qcm_attempts(student_id)",
+            "CREATE INDEX IF NOT EXISTS ix_qcm_attempts_course ON qcm_attempts(course_id)",
+            "CREATE INDEX IF NOT EXISTS ix_qcm_attempts_section ON qcm_attempts(section_id)",
         ]
         for sql in migrations:
             conn.execute(sa.text(sql))
@@ -285,12 +320,12 @@ app.include_router(category_router, prefix="/api")
 app.include_router(admin_router,    prefix="/api")
 app.include_router(chat_router,     prefix="/api")
 app.include_router(org_router,               prefix="/api")
-app.include_router(prof_verification_router, prefix="/api")
 app.include_router(ai_router,                prefix="/api")
 app.include_router(friend_router,            prefix="/api")
 app.include_router(notification_router,      prefix="/api")
 app.include_router(course_gen_router,        prefix="/api")
 app.include_router(announcement_router,      prefix="/api")
+app.include_router(payment_router,           prefix="/api")
 app.include_router(ws_router)  # No /api prefix — WebSocket paths start with /ws
 
 

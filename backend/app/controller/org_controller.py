@@ -88,13 +88,7 @@ def delete_region(actor: dict, region_id: str, db: Session) -> dict:
 def list_universities(actor: dict, db: Session, region_id: str | None = None) -> List[UniversityOut]:
     query = db.query(University)
 
-    # Regional admins only see their region
-    if actor["role"] == "regional_admin":
-        actor_region = actor.get("region_id")
-        if not actor_region:
-            return []
-        query = query.filter(University.region_id == UUID(actor_region))
-    elif region_id:
+    if region_id:
         query = query.filter(University.region_id == UUID(region_id))
 
     unis = query.order_by(University.name).all()
@@ -105,11 +99,6 @@ def create_university(actor: dict, data: UniversityCreate, db: Session) -> Unive
     region = db.query(Region).filter(Region.id == UUID(data.region_id)).first()
     if not region:
         raise HTTPException(status_code=404, detail="Region not found")
-
-    # Regional admin can only create universities in their own region
-    if actor["role"] == "regional_admin":
-        if actor.get("region_id") != data.region_id:
-            raise HTTPException(status_code=403, detail="You can only create universities in your own region")
 
     uni = University(name=data.name, region_id=UUID(data.region_id), created_by=UUID(actor["sub"]))
     db.add(uni)
@@ -123,11 +112,6 @@ def delete_university(actor: dict, university_id: str, db: Session) -> dict:
     if not uni:
         raise HTTPException(status_code=404, detail="University not found")
 
-    # Regional admin can only delete universities in their region
-    if actor["role"] == "regional_admin":
-        if str(uni.region_id) != actor.get("region_id"):
-            raise HTTPException(status_code=403, detail="University is not in your region")
-
     # Unlink all users from this university before deleting
     db.query(User).filter(User.university_id == uni.id).update({"university_id": None})
     db.delete(uni)
@@ -135,46 +119,16 @@ def delete_university(actor: dict, university_id: str, db: Session) -> dict:
     return {"detail": "University deleted"}
 
 
-# ── Admin creation (hierarchy-aware) ──────────────────────────────────────────
-
-def create_regional_admin(actor: dict, data: CreateAdminRequest, db: Session) -> dict:
-    """super_admin creates a regional_admin and assigns them a region."""
-    if not data.region_id:
-        raise HTTPException(status_code=400, detail="region_id is required")
-
-    region = db.query(Region).filter(Region.id == UUID(data.region_id)).first()
-    if not region:
-        raise HTTPException(status_code=404, detail="Region not found")
-
-    if db.query(User).filter(User.email == data.email).first():
-        raise HTTPException(status_code=409, detail="Email already registered")
-
-    user = User(
-        full_name=data.full_name,
-        email=data.email,
-        password_hash=hash_password(data.password),
-        role="regional_admin",
-        region_id=UUID(data.region_id),
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return {"id": str(user.id), "full_name": user.full_name, "email": user.email, "role": user.role}
-
+# ── Admin creation ────────────────────────────────────────────────────────────
 
 def create_university_admin(actor: dict, data: CreateAdminRequest, db: Session) -> dict:
-    """regional_admin creates a university_admin within their region."""
+    """super_admin creates a university_admin and assigns them a university."""
     if not data.university_id:
         raise HTTPException(status_code=400, detail="university_id is required")
 
     uni = db.query(University).filter(University.id == UUID(data.university_id)).first()
     if not uni:
         raise HTTPException(status_code=404, detail="University not found")
-
-    # regional_admin may only act within their own region
-    if actor["role"] == "regional_admin":
-        if str(uni.region_id) != actor.get("region_id"):
-            raise HTTPException(status_code=403, detail="University is not in your region")
 
     if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(status_code=409, detail="Email already registered")

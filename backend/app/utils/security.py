@@ -12,14 +12,13 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer()
 
 # ── Role hierarchy ─────────────────────────────────────────────────────────────
-VALID_ROLES = {"student", "professor", "university_admin", "regional_admin", "super_admin"}
+VALID_ROLES = {"student", "professor", "university_admin", "super_admin"}
 
 ROLE_RANK: dict[str, int] = {
     "student":          0,
     "professor":        1,
     "university_admin": 2,
-    "regional_admin":   3,
-    "super_admin":      4,
+    "super_admin":      3,
 }
 
 

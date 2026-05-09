@@ -50,7 +50,6 @@ async def change_role(
         "student": "Student",
         "professor": "Professor",
         "university_admin": "University Admin",
-        "regional_admin": "Regional Admin",
         "super_admin": "Super Admin",
     }
     label = role_labels.get(body.role, body.role)
@@ -76,7 +75,7 @@ def delete_user(
 
 # ── Courses ────────────────────────────────────────────────────────────────────
 # university_admin: list + toggle publish (scoped to their professors)
-# regional_admin+:  all of the above + delete
+# super_admin:      all of the above + delete
 
 @router.get("/courses", response_model=List[CourseOut])
 def list_all_courses(
@@ -100,6 +99,6 @@ def toggle_publish(
 def delete_course(
     course_id: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_min_rank("regional_admin")),
+    current_user: dict = Depends(require_role("super_admin")),
 ):
     return admin_controller.delete_course(course_id, db)

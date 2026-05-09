@@ -21,6 +21,7 @@ from app.schemas.course_generation import (
     UploadPDFResponse,
 )
 from app.utils.course_generator import generate_quiz, _content_prompt, _call_sync
+from app.utils.rag import index_course_sync
 from app.utils.security import get_current_user, require_role
 
 router = APIRouter(prefix="/course-gen", tags=["course-generation"])
@@ -125,11 +126,19 @@ async def regenerate_subsection(
 
     difficulty = body.difficulty if body.difficulty in _VALID_DIFFICULTIES else job.difficulty
 
+    # Re-format the EXISTING subsection text. The AI is format-only; we never
+    # rewrite the professor's content. Strip HTML to recover plain source text,
+    # then ask the polish prompt to lay it out again.
+    import re as _re
+    existing_html = subsection.get("content") or ""
+    plain_source = _re.sub(r"<[^>]+>", " ", existing_html)
+    plain_source = _re.sub(r"\s+", " ", plain_source).strip()
+
     prompt = _content_prompt(
         course_title=course["title"],
         section_title=section["title"],
         subsection_title=subsection["title"],
-        reference_text="Regenerate based on course context — no PDF reference available.",
+        reference_text=plain_source,
         difficulty=difficulty,
     )
     new_content = await asyncio.to_thread(_call_sync, prompt)
@@ -268,11 +277,25 @@ def import_into_course(
 
     db.commit()
 
+    # Index synchronously — import is a deliberate "course is ready" event,
+    # so we want the call to return only after Pinecone has the vectors.
+    # Bg threads can die under uvicorn --reload; sync is the reliable path.
+    indexed_chunks = 0
+    index_error: Optional[str] = None
+    try:
+        indexed_chunks = index_course_sync(course_id)
+    except Exception as exc:
+        import traceback as _tb
+        _tb.print_exc()
+        index_error = str(exc)
+
     return {
         "detail": "Import successful",
         "course_id": course_id,
         "sections_created": created_sections,
         "lessons_created": created_lessons,
+        "indexed_chunks": indexed_chunks,
+        "index_error": index_error,
     }
 
 

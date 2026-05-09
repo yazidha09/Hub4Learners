@@ -10,13 +10,12 @@ import {
 import {
   listRegions, createRegion, deleteRegion,
   listUniversities, createUniversity, deleteUniversity,
-  createRegionalAdmin, createUniversityAdmin, createProfessor,
+  createUniversityAdmin, createProfessor,
   listJoinRequests, reviewJoinRequest,
   type RegionOut, type UniversityOut, type JoinRequestOut,
 } from '../api/org'
 import { listCategories, createCategory, updateCategory, deleteCategory, type CategoryOut } from '../api/category'
 import type { CourseOut } from '../api/course'
-import { listVerifications, reviewVerification, type ProfVerificationOut } from '../api/prof_verification'
 
 /* ── Icons ── */
 const HomeIcon = () => (
@@ -32,11 +31,6 @@ const UsersIcon = () => (
 const BookIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-  </svg>
-)
-const ShieldIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
   </svg>
 )
 const TagIcon = () => (
@@ -61,14 +55,12 @@ const ALL_NAV: NavItem[] = [
   { id: 'users',            label: 'Users',                 icon: <UsersIcon /> },
   { id: 'courses',          label: 'Courses',               icon: <BookIcon /> },
   { id: 'categories',       label: 'Categories',            icon: <TagIcon /> },
-  { id: 'prof-verif',       label: 'Prof. Verifications',   icon: <ShieldIcon /> },
   { id: 'announcements',    label: 'Announcements',         icon: <MegaphoneIcon /> },
 ]
 
 // Which nav items each role may see
 const NAV_ALLOW: Record<string, string[]> = {
-  super_admin:      ['home', 'org', 'users', 'categories', 'prof-verif'],
-  regional_admin:   ['home', 'org', 'users', 'courses', 'prof-verif'],
+  super_admin:      ['home', 'org', 'users', 'courses', 'categories'],
   university_admin: ['home', 'org', 'users', 'announcements'],
 }
 
@@ -81,7 +73,6 @@ const ROLE_COLORS: Record<string, string> = {
   student:          'text-slate-500',
   professor:        'text-[#FF5533]',
   university_admin: 'text-blue-600',
-  regional_admin:   'text-violet-600',
   super_admin:      'text-emerald-600',
 }
 
@@ -105,15 +96,10 @@ function OverviewPanel({ token, userRole, universityName, regionName, onNav }: {
     listUsers(token).then(u => setRecentUsers(u.slice(0, 6))).catch(() => {})
   }, [token])
 
-  // ── Scoped overview for regional / university admins ──────────────────────
+  // ── Scoped overview for university admin ──────────────────────────────────
   if (!isSuperAdmin) {
-    const scopeLabel = userRole === 'regional_admin'
-      ? `Region: ${regionName ?? 'Your Region'}`
-      : `University: ${universityName ?? 'Your University'}${regionName ? ` · ${regionName}` : ''}`
-
-    const quickActions = userRole === 'regional_admin'
-      ? [{ label: 'Manage Universities', nav: 'org' }, { label: 'Manage Users', nav: 'users' }, { label: 'Prof. Verifications', nav: 'prof-verif' }]
-      : [{ label: 'Create Professors', nav: 'org' }, { label: 'Manage Users', nav: 'users' }]
+    const scopeLabel = `University: ${universityName ?? 'Your University'}${regionName ? ` · ${regionName}` : ''}`
+    const quickActions = [{ label: 'Create Professors', nav: 'org' }, { label: 'Manage Users', nav: 'users' }]
 
     return (
       <div className="max-w-[1020px] mx-auto px-6 md:px-10 py-8">
@@ -137,7 +123,7 @@ function OverviewPanel({ token, userRole, universityName, regionName, onNav }: {
 
         {/* Recent users in scope */}
         <h2 className="text-[0.68rem] font-bold tracking-[0.12em] uppercase text-[#94A3B8] mb-4">
-          Recent users {userRole === 'regional_admin' ? 'in your region' : 'in your university'}
+          Recent users in your university
         </h2>
         <div className="bg-white border border-[#E5E7EB] rounded-xl overflow-x-auto shadow-[0_16px_44px_rgba(12,12,15,0.06)]">
           <div className="min-w-[500px]">
@@ -182,10 +168,9 @@ function OverviewPanel({ token, userRole, universityName, regionName, onNav }: {
         students:          stats.total_users ? Math.round((stats.total_students / stats.total_users) * 100) : 0,
         professors:        stats.total_users ? Math.round((stats.total_professors / stats.total_users) * 100) : 0,
         university_admins: stats.total_users ? Math.round(((stats.total_university_admins ?? 0) / stats.total_users) * 100) : 0,
-        regional_admins:   stats.total_users ? Math.round(((stats.total_regional_admins ?? 0) / stats.total_users) * 100) : 0,
         super_admins:      stats.total_users ? Math.round(((stats.total_super_admins ?? 0) / stats.total_users) * 100) : 0,
       }
-    : { students: 0, professors: 0, university_admins: 0, regional_admins: 0, super_admins: 0 }
+    : { students: 0, professors: 0, university_admins: 0, super_admins: 0 }
 
   return (
     <div className="max-w-[1020px] mx-auto px-6 md:px-10 py-8">
@@ -199,15 +184,15 @@ function OverviewPanel({ token, userRole, universityName, regionName, onNav }: {
               <p className="text-[0.7rem] font-bold tracking-[0.16em] uppercase text-white/70 mb-1">Administration</p>
               <h1 className="text-[1.9rem] font-black tracking-[-0.03em] leading-tight">Platform overview</h1>
               <p className="text-white/70 text-[0.95rem] max-w-xl mt-2">
-                Manage users, courses, categories, and professor verifications from one control center.
+                Manage users, courses, and categories from one control center.
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <button onClick={() => onNav('prof-verif')} className="h-11 px-5 rounded-xl bg-white text-[#0C0C0F] font-semibold text-[0.9rem] border-none cursor-pointer shadow-md hover:-translate-y-0.5 transition-all">
-                Prof. verifications
-              </button>
-              <button onClick={() => onNav('users')} className="h-11 px-5 rounded-xl border border-white/40 text-white/90 font-semibold text-[0.9rem] bg-white/10 backdrop-blur cursor-pointer hover:border-white/70 transition-all">
+              <button onClick={() => onNav('users')} className="h-11 px-5 rounded-xl bg-white text-[#0C0C0F] font-semibold text-[0.9rem] border-none cursor-pointer shadow-md hover:-translate-y-0.5 transition-all">
                 Manage users
+              </button>
+              <button onClick={() => onNav('courses')} className="h-11 px-5 rounded-xl border border-white/40 text-white/90 font-semibold text-[0.9rem] bg-white/10 backdrop-blur cursor-pointer hover:border-white/70 transition-all">
+                Browse courses
               </button>
             </div>
           </div>
@@ -259,7 +244,6 @@ function OverviewPanel({ token, userRole, universityName, regionName, onNav }: {
               <div style={{ width: `${pcts.students}%`, background: '#0C0C0F' }} />
               <div style={{ width: `${pcts.professors}%`, background: '#FF5533' }} />
               <div style={{ width: `${pcts.university_admins}%`, background: '#3B82F6' }} />
-              <div style={{ width: `${pcts.regional_admins}%`, background: '#7C3AED' }} />
               <div style={{ width: `${pcts.super_admins}%`, background: '#10B981' }} />
             </div>
             <div className="flex flex-col gap-2">
@@ -267,7 +251,6 @@ function OverviewPanel({ token, userRole, universityName, regionName, onNav }: {
                 { label: 'Students',          pct: pcts.students,          color: '#0C0C0F' },
                 { label: 'Professors',         pct: pcts.professors,        color: '#FF5533' },
                 { label: 'Univ. Admins',       pct: pcts.university_admins, color: '#3B82F6' },
-                { label: 'Regional Admins',    pct: pcts.regional_admins,   color: '#7C3AED' },
                 { label: 'Super Admins',       pct: pcts.super_admins,      color: '#10B981' },
               ].map(r => (
                 <div key={r.label} className="flex items-center justify-between">
@@ -619,6 +602,9 @@ function CoursesPanel({ token, userRole }: { token: string; userRole: string }) 
                   {c.category_name && (
                     <span className="text-[10px] font-semibold text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full">{c.category_name}</span>
                   )}
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${c.is_free ? 'text-emerald-700 bg-emerald-50' : 'text-amber-700 bg-amber-50'}`}>
+                    {c.is_free ? 'Free' : `$${Number(c.price).toFixed(2)}`}
+                  </span>
                   <span className="text-xs text-slate-400">{c.sections_count} sections</span>
                   <span className="text-xs text-slate-400">{c.enrolled_count} enrolled</span>
                 </div>
@@ -626,6 +612,13 @@ function CoursesPanel({ token, userRole }: { token: string; userRole: string }) 
 
               {/* Status + actions */}
               <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => window.open(`/learn/${c.id}?preview=1`, '_blank')}
+                  title="Open course as student (full access for admins)"
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-slate-200 bg-white text-slate-600 hover:border-slate-400 hover:text-slate-900 transition-all cursor-pointer"
+                >
+                  View
+                </button>
                 <button
                   onClick={() => handleToggle(c.id)}
                   disabled={actionLoading === c.id}
@@ -883,10 +876,10 @@ function CategoriesPanel({ token }: { token: string }) {
    ORGANIZATION PANEL
    ════════════════════════════════════════════════════════════════════════════ */
 
-function OrgPanel({ token, userRole, userRegionId }: { token: string; userRole: string; userRegionId: string | null }) {
-  // super_admin → regions, regional_admin → universities, university_admin → professors
+function OrgPanel({ token, userRole }: { token: string; userRole: string }) {
+  // super_admin → regions, university_admin → professors
   const [tab, setTab] = useState<'regions' | 'universities' | 'admins' | 'professors' | 'join-requests'>(
-    userRole === 'super_admin' ? 'regions' : userRole === 'university_admin' ? 'professors' : 'universities'
+    userRole === 'super_admin' ? 'regions' : 'professors'
   )
   const [regions, setRegions] = useState<RegionOut[]>([])
   const [universities, setUniversities] = useState<UniversityOut[]>([])
@@ -903,16 +896,11 @@ function OrgPanel({ token, userRole, userRegionId }: { token: string; userRole: 
   // University form
   const [showUniForm, setShowUniForm] = useState(false)
   const [uniName, setUniName] = useState('')
-  // regional_admin is locked to their own region; others can pick from dropdown
-  const [uniRegionId, setUniRegionId] = useState(userRole === 'regional_admin' ? (userRegionId ?? '') : '')
+  const [uniRegionId, setUniRegionId] = useState('')
   const [savingUni, setSavingUni] = useState(false)
 
-  // Admin creation form
-  // super_admin can create both types; regional_admin can only create university admins
-  const [adminType, setAdminType] = useState<'regional' | 'university'>(
-    userRole === 'super_admin' ? 'regional' : 'university'
-  )
-  const [adminForm, setAdminForm] = useState({ full_name: '', email: '', password: '', region_id: '', university_id: '' })
+  // Admin creation form (super_admin only — university admins)
+  const [adminForm, setAdminForm] = useState({ full_name: '', email: '', password: '', university_id: '' })
   const [savingAdmin, setSavingAdmin] = useState(false)
   const [adminSuccess, setAdminSuccess] = useState('')
 
@@ -926,7 +914,6 @@ function OrgPanel({ token, userRole, userRegionId }: { token: string; userRole: 
   const [reviewingReq, setReviewingReq] = useState<string | null>(null)
 
   const isSuperAdmin = userRole === 'super_admin'
-  const isRegionalAdmin = userRole === 'regional_admin'
   const isUniversityAdmin = userRole === 'university_admin'
 
   useEffect(() => {
@@ -934,7 +921,7 @@ function OrgPanel({ token, userRole, userRegionId }: { token: string; userRole: 
     const loads: Promise<any>[] = [
       listRegions(token).then(setRegions).catch(() => {}),
     ]
-    if (isSuperAdmin || isRegionalAdmin) {
+    if (isSuperAdmin) {
       loads.push(listUniversities(token).then(setUniversities).catch(() => {}))
     }
     if (isUniversityAdmin) {
@@ -989,13 +976,9 @@ function OrgPanel({ token, userRole, userRegionId }: { token: string; userRole: 
     e.preventDefault()
     setSavingAdmin(true); setErr(''); setAdminSuccess('')
     try {
-      if (adminType === 'regional') {
-        await createRegionalAdmin(token, { ...adminForm, region_id: adminForm.region_id })
-      } else {
-        await createUniversityAdmin(token, { ...adminForm, university_id: adminForm.university_id })
-      }
-      setAdminSuccess(`${adminType === 'regional' ? 'Regional' : 'University'} admin created successfully`)
-      setAdminForm({ full_name: '', email: '', password: '', region_id: '', university_id: '' })
+      await createUniversityAdmin(token, { ...adminForm, university_id: adminForm.university_id })
+      setAdminSuccess('University admin created successfully')
+      setAdminForm({ full_name: '', email: '', password: '', university_id: '' })
     } catch (e: any) { setErr(e.message) }
     finally { setSavingAdmin(false) }
   }
@@ -1023,8 +1006,8 @@ function OrgPanel({ token, userRole, userRegionId }: { token: string; userRole: 
 
   const tabs = [
     { id: 'regions' as const,      label: 'Regions',          show: isSuperAdmin },
-    { id: 'universities' as const, label: 'Universities',     show: isSuperAdmin || isRegionalAdmin },
-    { id: 'admins' as const,       label: 'Create Admins',    show: isSuperAdmin || isRegionalAdmin },
+    { id: 'universities' as const, label: 'Universities',     show: isSuperAdmin },
+    { id: 'admins' as const,       label: 'Create Admins',    show: isSuperAdmin },
     { id: 'professors' as const,   label: 'Create Professor', show: isUniversityAdmin },
     { id: 'join-requests' as const, label: `Join Requests${joinRequests.length ? ` (${joinRequests.length})` : ''}`, show: isUniversityAdmin },
   ].filter(t => t.show)
@@ -1148,19 +1131,13 @@ function OrgPanel({ token, userRole, userRegionId }: { token: string; userRole: 
               <h3 className="text-sm font-semibold text-slate-900">New university</h3>
               <input value={uniName} onChange={e => setUniName(e.target.value)} placeholder="University name *"
                 className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100" />
-              {isRegionalAdmin ? (
-                <div className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm bg-slate-50 text-slate-500 flex items-center">
-                  {regions.find(r => r.id === uniRegionId)?.name ?? 'Your region'}
-                </div>
-              ) : (
-                <select value={uniRegionId} onChange={e => setUniRegionId(e.target.value)}
-                  className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 bg-white">
-                  <option value="">Select region *</option>
-                  {regions.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                </select>
-              )}
+              <select value={uniRegionId} onChange={e => setUniRegionId(e.target.value)}
+                className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 bg-white">
+                <option value="">Select region *</option>
+                {regions.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
               <div className="flex gap-2 pt-1">
-                <button type="button" onClick={() => { setShowUniForm(false); setUniName(''); setUniRegionId(isRegionalAdmin ? (userRegionId ?? '') : '') }}
+                <button type="button" onClick={() => { setShowUniForm(false); setUniName(''); setUniRegionId('') }}
                   className="flex-1 h-9 rounded-lg text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 border-none cursor-pointer">Cancel</button>
                 <button type="submit" disabled={!uniName.trim() || !uniRegionId || savingUni}
                   className="flex-1 h-9 rounded-lg text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed border-none cursor-pointer">
@@ -1286,20 +1263,6 @@ function OrgPanel({ token, userRole, userRegionId }: { token: string; userRole: 
       {/* ── Create Admin Tab ── */}
       {tab === 'admins' && (
         <div className="max-w-[520px]">
-          {/* Type toggle */}
-          {isSuperAdmin && (
-            <div className="flex gap-2 mb-5">
-              {(['regional', 'university'] as const).map(t => (
-                <button key={t} onClick={() => setAdminType(t)}
-                  className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-all ${
-                    adminType === t ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
-                  }`}>
-                  {t === 'regional' ? 'Regional Admin' : 'University Admin'}
-                </button>
-              ))}
-            </div>
-          )}
-
           {adminSuccess && (
             <div className="flex items-center gap-3 p-4 mb-4 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-700">
               <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
@@ -1308,9 +1271,7 @@ function OrgPanel({ token, userRole, userRegionId }: { token: string; userRole: 
           )}
 
           <form onSubmit={handleCreateAdmin} className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
-            <h3 className="text-sm font-semibold text-slate-900">
-              Create {adminType === 'regional' ? 'Regional' : 'University'} Admin
-            </h3>
+            <h3 className="text-sm font-semibold text-slate-900">Create University Admin</h3>
             <div className="space-y-3">
               <input value={adminForm.full_name} onChange={e => setAdminForm(p => ({ ...p, full_name: e.target.value }))}
                 placeholder="Full name *"
@@ -1321,22 +1282,11 @@ function OrgPanel({ token, userRole, userRegionId }: { token: string; userRole: 
               <input value={adminForm.password} onChange={e => setAdminForm(p => ({ ...p, password: e.target.value }))}
                 placeholder="Password *" type="password"
                 className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100" />
-
-              {adminType === 'regional' && (
-                <select value={adminForm.region_id} onChange={e => setAdminForm(p => ({ ...p, region_id: e.target.value }))}
-                  className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 bg-white">
-                  <option value="">Assign to region *</option>
-                  {regions.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                </select>
-              )}
-
-              {adminType === 'university' && (
-                <select value={adminForm.university_id} onChange={e => setAdminForm(p => ({ ...p, university_id: e.target.value }))}
-                  className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 bg-white">
-                  <option value="">Assign to university *</option>
-                  {universities.map(u => <option key={u.id} value={u.id}>{u.name} ({u.region_name})</option>)}
-                </select>
-              )}
+              <select value={adminForm.university_id} onChange={e => setAdminForm(p => ({ ...p, university_id: e.target.value }))}
+                className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 bg-white">
+                <option value="">Assign to university *</option>
+                {universities.map(u => <option key={u.id} value={u.id}>{u.name} ({u.region_name})</option>)}
+              </select>
             </div>
 
             <button type="submit" disabled={savingAdmin}
@@ -1346,119 +1296,6 @@ function OrgPanel({ token, userRole, userRegionId }: { token: string; userRole: 
           </form>
         </div>
       )}
-    </div>
-  )
-}
-
-/* ════════════════════════════════════════════════════════════════════════════
-   PROFESSOR VERIFICATION PANEL
-   ════════════════════════════════════════════════════════════════════════════ */
-
-function ProfVerificationPanel({ token }: { token: string }) {
-  const [requests, setRequests] = useState<ProfVerificationOut[]>([])
-  const [loading, setLoading] = useState(true)
-  const [actionLoading, setActionLoading] = useState<string | null>(null)
-
-  useEffect(() => {
-    listVerifications(token).then(setRequests).finally(() => setLoading(false))
-  }, [token])
-
-  const handleAction = async (id: string, action: 'approve' | 'reject') => {
-    setActionLoading(id)
-    try {
-      const updated = await reviewVerification(token, id, action)
-      setRequests(prev => prev.map(r => r.id === id ? updated : r))
-    } finally { setActionLoading(null) }
-  }
-
-  if (loading) {
-    return (
-      <div className="space-y-4">
-        {[...Array(3)].map((_, i) => <div key={i} className="h-36 rounded-2xl skeleton" />)}
-      </div>
-    )
-  }
-
-  if (requests.length === 0) {
-    return (
-      <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-200">
-        <div className="w-14 h-14 mx-auto mb-4 bg-slate-100 rounded-2xl flex items-center justify-center">
-          <svg className="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-          </svg>
-        </div>
-        <p className="text-base font-semibold text-slate-900 mb-1">No verification requests</p>
-        <p className="text-sm text-slate-500">Pending requests from independent professors will appear here</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-4">
-      {requests.map(req => {
-        const isPending = req.status === 'pending'
-        const statusStyle =
-          req.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-          req.status === 'rejected' ? 'bg-red-50 text-red-700 border-red-200' :
-          'bg-amber-50 text-amber-700 border-amber-200'
-
-        return (
-          <div key={req.id} className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] overflow-hidden">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 flex items-center justify-center text-lg font-bold text-amber-700 border border-amber-100">
-                  {(req.professor_name || '?').charAt(0).toUpperCase()}
-                </div>
-                <div>
-                  <p className="font-semibold text-slate-900">{req.professor_name}</p>
-                  <p className="text-sm text-slate-500">Region: {req.region_name || '—'}</p>
-                </div>
-              </div>
-              <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold ${statusStyle}`}>
-                {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
-              </span>
-            </div>
-
-            <div className="p-5 grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-              <div>
-                <p className="text-[0.68rem] font-bold uppercase tracking-wide text-slate-400 mb-0.5">First name</p>
-                <p className="font-medium text-slate-800">{req.first_name}</p>
-              </div>
-              <div>
-                <p className="text-[0.68rem] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Father's name</p>
-                <p className="font-medium text-slate-800">{req.father_name}</p>
-              </div>
-              <div>
-                <p className="text-[0.68rem] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Grandfather's name</p>
-                <p className="font-medium text-slate-800">{req.grandfather_name}</p>
-              </div>
-              <div>
-                <p className="text-[0.68rem] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Date of birth</p>
-                <p className="font-medium text-slate-800">{new Date(req.birth_date).toLocaleDateString()}</p>
-              </div>
-            </div>
-
-            {isPending && (
-              <div className="px-5 pb-5 flex gap-3">
-                <button
-                  onClick={() => handleAction(req.id, 'approve')}
-                  disabled={actionLoading === req.id}
-                  className="h-9 px-5 rounded-xl bg-emerald-500 text-white text-sm font-semibold border-none cursor-pointer hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {actionLoading === req.id ? '...' : 'Approve'}
-                </button>
-                <button
-                  onClick={() => handleAction(req.id, 'reject')}
-                  disabled={actionLoading === req.id}
-                  className="h-9 px-5 rounded-xl bg-red-50 text-red-600 border border-red-200 text-sm font-semibold cursor-pointer hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {actionLoading === req.id ? '...' : 'Reject'}
-                </button>
-              </div>
-            )}
-          </div>
-        )
-      })}
     </div>
   )
 }
@@ -1578,7 +1415,6 @@ function AnnouncementsPanel({ token }: { token: string }) {
 
 const ROLE_LABEL_MAP: Record<string, string> = {
   super_admin:      'Super Admin',
-  regional_admin:   'Regional Admin',
   university_admin: 'Univ. Admin',
   professor:        'Professor',
   student:          'Student',
@@ -1627,15 +1463,13 @@ export default function AdminDashboard() {
     const orgSubtitle = role === 'university_admin'
       ? 'Create professor accounts for your university.'
       : 'Manage regions, universities, and admin accounts.'
-    return wrapper('Organization', orgSubtitle, <OrgPanel token={token!} userRole={role} userRegionId={user?.region_id ?? null} />)
+    return wrapper('Organization', orgSubtitle, <OrgPanel token={token!} userRole={role} />)
   }
 
   if (activeNav === 'users') {
-    const scopeNote = role === 'regional_admin'
-      ? `Users in ${user?.region_name ?? 'your region'}`
-      : role === 'university_admin'
-        ? `Users in ${user?.university_name ?? 'your university'}`
-        : 'Manage all platform users, change roles, or remove accounts.'
+    const scopeNote = role === 'university_admin'
+      ? `Users in ${user?.university_name ?? 'your university'}`
+      : 'Manage all platform users, change roles, or remove accounts.'
     return wrapper('Users', scopeNote, <UsersPanel token={token!} userRole={role} />)
   }
 
@@ -1649,14 +1483,6 @@ export default function AdminDashboard() {
 
   if (activeNav === 'categories') {
     return wrapper('Categories', 'Create and manage course categories.', <CategoriesPanel token={token!} />)
-  }
-
-  if (activeNav === 'prof-verif') {
-    return wrapper(
-      'Professor Verifications',
-      'Review civil identity verification requests from independent professors.',
-      <ProfVerificationPanel token={token!} />
-    )
   }
 
   return (

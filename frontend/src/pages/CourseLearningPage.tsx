@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { useAuth } from '../context/AuthContext'
 import {
   getCourseDetail, getCourseProgress, markItemCompleted,
@@ -8,6 +9,13 @@ import {
   type CourseOut, type SubsectionOut, type LessonBlockOut, type MaterialOut, type CourseProgressOut,
   type FeedbackOut,
 } from '../api/course'
+import {
+  getQCMHistory,
+  getCourseSummary,
+  regenerateCourseSummary,
+  type QCMAttemptOut,
+} from '../api/qcm'
+import QCMModal from '../components/QCMModal'
 
 interface ChatMessage {
   id: string
@@ -292,6 +300,15 @@ export default function CourseLearningPage() {
   const [feedbackError, setFeedbackError] = useState('')
   const userFeedback = user ? feedbacks.find(f => f.user_id === user.id) : undefined
 
+  const [qcmAttempts, setQcmAttempts] = useState<QCMAttemptOut[]>([])
+  const [qcmModal, setQcmModal] = useState<{ sectionId?: string; scopeLabel: string } | null>(null)
+
+  // AI course summary (markdown recap rendered at the bottom of the course)
+  const [summaryMd, setSummaryMd] = useState<string | null>(null)
+  const [summaryGeneratedAt, setSummaryGeneratedAt] = useState<string | null>(null)
+  const [summaryGenerating, setSummaryGenerating] = useState(false)
+  const [summaryError, setSummaryError] = useState('')
+
   useEffect(() => {
     if (!courseId) return
     setLoading(true)
@@ -328,6 +345,41 @@ export default function CourseLearningPage() {
     if (!courseId || isPreview) return
     getCourseFeedback(courseId).then(setFeedbacks).catch(() => {})
   }, [courseId, isPreview])
+
+  const refreshQcmHistory = () => {
+    if (!courseId || !token || isPreview) return
+    getQCMHistory(token, courseId).then(setQcmAttempts).catch(() => {})
+  }
+
+  useEffect(() => {
+    refreshQcmHistory()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseId, token, isPreview])
+
+  useEffect(() => {
+    if (!courseId || !token || isPreview) return
+    getCourseSummary(token, courseId)
+      .then(s => {
+        setSummaryMd(s.summary ?? null)
+        setSummaryGeneratedAt(s.generated_at ?? null)
+      })
+      .catch(() => {})
+  }, [courseId, token, isPreview])
+
+  const handleGenerateSummary = async () => {
+    if (!courseId || !token || summaryGenerating) return
+    setSummaryGenerating(true)
+    setSummaryError('')
+    try {
+      const s = await regenerateCourseSummary(token, courseId)
+      setSummaryMd(s.summary ?? null)
+      setSummaryGeneratedAt(s.generated_at ?? null)
+    } catch (e) {
+      setSummaryError(e instanceof Error ? e.message : 'Could not generate summary.')
+    } finally {
+      setSummaryGenerating(false)
+    }
+  }
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -412,6 +464,27 @@ export default function CourseLearningPage() {
       }
     } catch { setReindexMsg('Could not reach the server.') }
     finally { setReindexing(false) }
+  }
+
+  /* ─── Section / course completion helpers (used to gate quiz cards) ─── */
+  const isSectionDone = (section: CourseOut['sections'][number]): boolean => {
+    if (!progress) return false
+    const subs = section.subsections ?? []
+    const mats = section.materials ?? []
+    if (subs.length === 0 && mats.length === 0) return false
+    const subsDone = subs.every(s => progress.completed_subsection_ids.includes(s.id))
+    const matsDone = subs.length === 0
+      ? mats.every(m => progress.completed_material_ids.includes(m.id))
+      : true
+    return subsDone && matsDone
+  }
+
+  const bestAttemptFor = (sectionId?: string): QCMAttemptOut | undefined => {
+    const filtered = qcmAttempts.filter(a =>
+      sectionId ? a.section_id === sectionId : !a.section_id
+    )
+    if (filtered.length === 0) return undefined
+    return filtered.reduce((best, cur) => (cur.score_pct > best.score_pct ? cur : best))
   }
 
   if (loading) {
@@ -767,6 +840,253 @@ export default function CourseLearningPage() {
               </div>
             )}
 
+            {/* ── AI Knowledge Checks (per section + final exam) ── */}
+            {!isPreview && token && sortedSections.length > 0 && (
+              <div className="max-w-3xl mx-auto px-6 pb-10">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="flex-1 h-px bg-[#1E2028]" />
+                  <span className="text-[0.65rem] font-bold text-[#334155] uppercase tracking-[0.12em]">AI Knowledge Checks</span>
+                  <div className="flex-1 h-px bg-[#1E2028]" />
+                </div>
+
+                <div className="space-y-3">
+                  {sortedSections.map((section, si) => {
+                    const done = isSectionDone(section)
+                    const best = bestAttemptFor(section.id)
+                    return (
+                      <div
+                        key={section.id}
+                        className={`p-4 rounded-2xl border flex items-center gap-4 ${
+                          done
+                            ? 'bg-[#111318] border-[#1E2028]'
+                            : 'bg-[#0F1117] border-[#1A1D25] opacity-60'
+                        }`}
+                      >
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                          best?.passed
+                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                            : done
+                              ? 'bg-[#FF5533]/12 text-[#FF5533] border border-[#FF5533]/25'
+                              : 'bg-[#1A1D25] text-[#334155] border border-[#252830]'
+                        }`}>
+                          {best?.passed ? (
+                            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                          ) : done ? (
+                            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
+                            </svg>
+                          ) : (
+                            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                            </svg>
+                          )}
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <p className="text-[0.62rem] font-bold text-[#475569] uppercase tracking-wider">Section {si + 1}</p>
+                            {best && (
+                              <span className={`text-[0.62rem] font-bold px-1.5 py-0.5 rounded ${
+                                best.passed ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'
+                              }`}>
+                                Best: {best.score_pct}% ({best.difficulty})
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[0.85rem] font-semibold text-white truncate">{section.title}</p>
+                          <p className="text-[0.7rem] text-[#475569] mt-0.5">
+                            {done ? 'Optional — test your understanding.' : 'Complete the section to unlock.'}
+                          </p>
+                        </div>
+
+                        <button
+                          onClick={() => setQcmModal({ sectionId: section.id, scopeLabel: `Section: ${section.title}` })}
+                          disabled={!done}
+                          className="shrink-0 px-4 py-2 rounded-xl bg-[#FF5533] text-white text-[0.78rem] font-semibold hover:bg-[#E64422] disabled:bg-[#1A1D25] disabled:text-[#334155] disabled:cursor-not-allowed transition-colors"
+                        >
+                          {best ? 'Retake' : 'Take Quiz'}
+                        </button>
+                      </div>
+                    )
+                  })}
+
+                  {/* Final exam — full course */}
+                  {(() => {
+                    const courseDone = !!progress && progress.progress_pct >= 100
+                    const best = bestAttemptFor(undefined)
+                    return (
+                      <div className={`p-4 rounded-2xl border flex items-center gap-4 ${
+                        courseDone
+                          ? 'bg-[#FF5533]/[0.06] border-[#FF5533]/25'
+                          : 'bg-[#0F1117] border-[#1A1D25] border-dashed opacity-60'
+                      }`}>
+                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${
+                          best?.passed
+                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                            : courseDone
+                              ? 'bg-[#FF5533] text-white'
+                              : 'bg-[#1A1D25] text-[#334155] border border-[#252830]'
+                        }`}>
+                          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 18.75h-9m9 0a3 3 0 013 3h-15a3 3 0 013-3m9 0v-3.375c0-.621-.503-1.125-1.125-1.125h-.871M7.5 18.75v-3.375c0-.621.504-1.125 1.125-1.125h.872m5.007 0H9.497m5.007 0a7.454 7.454 0 01-.982-3.172M9.497 14.25a7.454 7.454 0 00.981-3.172M5.25 4.236c-.982.143-1.954.317-2.916.52A6.003 6.003 0 007.73 9.728M5.25 4.236V4.5c0 2.108.966 3.99 2.48 5.228M5.25 4.236V2.721C7.456 2.41 9.71 2.25 12 2.25c2.291 0 4.545.16 6.75.47v1.516M7.73 9.728a6.726 6.726 0 002.748 1.35m8.272-6.842V4.5c0 2.108-.966 3.99-2.48 5.228m2.48-5.492a46.32 46.32 0 012.916.52 6.003 6.003 0 01-5.395 4.972m0 0a6.726 6.726 0 01-2.749 1.35m0 0a6.772 6.772 0 01-3.044 0" />
+                          </svg>
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <p className="text-[0.62rem] font-bold text-[#FF5533] uppercase tracking-wider">Final Exam</p>
+                            {best && (
+                              <span className={`text-[0.62rem] font-bold px-1.5 py-0.5 rounded ${
+                                best.passed ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'
+                              }`}>
+                                Best: {best.score_pct}% ({best.difficulty})
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[0.9rem] font-bold text-white truncate">Course-wide Knowledge Check</p>
+                          <p className="text-[0.7rem] text-[#94A3B8] mt-0.5">
+                            {courseDone
+                              ? 'Bring it all together — questions span the whole course.'
+                              : 'Reach 100% course progress to unlock.'}
+                          </p>
+                        </div>
+
+                        <button
+                          onClick={() => setQcmModal({ scopeLabel: `Final Exam: ${course.title}` })}
+                          disabled={!courseDone}
+                          className="shrink-0 px-4 py-2 rounded-xl bg-[#FF5533] text-white text-[0.78rem] font-semibold hover:bg-[#E64422] disabled:bg-[#1A1D25] disabled:text-[#334155] disabled:cursor-not-allowed transition-colors"
+                        >
+                          {best ? 'Retake' : 'Start Exam'}
+                        </button>
+                      </div>
+                    )
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* ── AI Course Recap — markdown summary of the entire course ── */}
+            {!isPreview && token && (
+              <div className="max-w-3xl mx-auto px-6 pb-12">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="flex-1 h-px bg-[#1E2028]" />
+                  <span className="text-[0.65rem] font-bold text-[#334155] uppercase tracking-[0.12em]">AI Course Recap</span>
+                  <div className="flex-1 h-px bg-[#1E2028]" />
+                </div>
+
+                <div className="rounded-2xl border border-[#1E2028] bg-gradient-to-b from-[#111318] to-[#0F1117] overflow-hidden">
+                  {/* Header */}
+                  <div className="flex items-start gap-4 px-5 py-4 border-b border-[#1E2028] bg-[#0F1117]/60">
+                    <div className="w-10 h-10 rounded-xl bg-[#FF5533]/12 border border-[#FF5533]/25 flex items-center justify-center shrink-0">
+                      <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#FF5533" strokeWidth={1.8}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[0.92rem] font-bold text-white leading-snug">Smart course recap</p>
+                      <p className="text-[0.72rem] text-[#64748B] mt-0.5 leading-relaxed">
+                        A polished AI-generated summary covering every section — learning outcomes, key concepts, and a cheat sheet you can revise from.
+                      </p>
+                      {summaryGeneratedAt && (
+                        <p className="text-[0.65rem] text-[#475569] mt-1.5 font-mono">
+                          Last generated {new Date(summaryGeneratedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      onClick={handleGenerateSummary}
+                      disabled={summaryGenerating}
+                      className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#FF5533] text-white text-[0.78rem] font-semibold hover:bg-[#E64422] disabled:bg-[#1A1D25] disabled:text-[#334155] disabled:cursor-not-allowed transition-colors"
+                    >
+                      {summaryGenerating ? (
+                        <>
+                          <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          Generating…
+                        </>
+                      ) : summaryMd ? (
+                        <>
+                          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                          </svg>
+                          Regenerate
+                        </>
+                      ) : (
+                        <>
+                          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+                          </svg>
+                          Generate
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Body */}
+                  <div className="px-6 py-6">
+                    {summaryError && (
+                      <div className="mb-4 px-4 py-3 rounded-xl bg-red-500/8 border border-red-500/25 text-[0.78rem] text-red-300">
+                        {summaryError}
+                      </div>
+                    )}
+
+                    {summaryMd ? (
+                      <div className="
+                        prose prose-invert max-w-none text-[#CBD5E1] leading-[1.8]
+                        [&>h2]:text-[1.25rem] [&>h2]:font-bold [&>h2]:text-white
+                        [&>h2]:mt-2 [&>h2]:mb-5 [&>h2]:pb-2.5
+                        [&>h2]:border-b [&>h2]:border-[#FF5533]/35
+                        [&>h2]:flex [&>h2]:items-center [&>h2]:gap-2
+                        [&>h3]:text-[1.02rem] [&>h3]:font-semibold [&>h3]:text-[#F1F5F9]
+                        [&>h3]:mt-7 [&>h3]:mb-3 [&>h3]:pb-1.5
+                        [&>h3]:border-b [&>h3]:border-[#1E2028]
+                        [&>h4]:text-[0.9rem] [&>h4]:font-semibold [&>h4]:text-[#FF5533]
+                        [&>h4]:mt-5 [&>h4]:mb-2 [&>h4]:uppercase [&>h4]:tracking-[0.04em]
+                        [&>p]:text-[0.88rem] [&>p]:mb-4 [&>p]:text-[#CBD5E1]
+                        [&>ul]:list-disc [&>ul]:pl-6 [&>ul]:mb-5 [&>ul]:space-y-1.5
+                        [&>ol]:list-decimal [&>ol]:pl-6 [&>ol]:mb-5 [&>ol]:space-y-1.5
+                        [&_li]:text-[0.85rem] [&_li]:text-[#94A3B8] [&_li]:leading-relaxed
+                        [&_li>strong]:text-[#E2E8F0]
+                        [&>blockquote]:border-l-[3px] [&>blockquote]:border-[#FF5533]/50
+                        [&>blockquote]:pl-4 [&>blockquote]:my-5 [&>blockquote]:text-[#94A3B8] [&>blockquote]:italic
+                        [&_strong]:text-white [&_strong]:font-semibold
+                        [&_em]:text-[#94A3B8]
+                        [&_code]:bg-[#1A1D25] [&_code]:text-[#FF5533]
+                        [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[0.78rem]
+                        [&_code]:font-mono [&_code]:border [&_code]:border-[#1E2028]
+                        [&>table]:w-full [&>table]:my-5 [&>table]:border-collapse
+                        [&>table]:rounded-xl [&>table]:overflow-hidden
+                        [&>table]:border [&>table]:border-[#1E2028]
+                        [&_thead]:bg-[#1A1D25]
+                        [&_th]:px-4 [&_th]:py-2.5 [&_th]:text-left [&_th]:text-[0.72rem]
+                        [&_th]:font-bold [&_th]:text-[#E2E8F0] [&_th]:uppercase [&_th]:tracking-wider
+                        [&_th]:border-b [&_th]:border-[#252830]
+                        [&_td]:px-4 [&_td]:py-2.5 [&_td]:text-[0.82rem] [&_td]:text-[#CBD5E1]
+                        [&_td]:border-t [&_td]:border-[#1E2028] [&_td]:align-top
+                        [&_tbody_tr:hover]:bg-[#FF5533]/[0.03]
+                        [&_a]:text-[#FF5533] [&_a]:underline [&_a]:underline-offset-2
+                      ">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{summaryMd}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <div className="text-center py-8">
+                        <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-[#1A1D25] border border-[#252830] flex items-center justify-center">
+                          <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="#475569" strokeWidth={1.6}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+                          </svg>
+                        </div>
+                        <p className="text-[0.88rem] font-semibold text-[#CBD5E1]">No recap yet</p>
+                        <p className="text-[0.76rem] text-[#475569] mt-1.5 max-w-sm mx-auto leading-relaxed">
+                          Generate a structured AI summary of the full course — perfect for last-minute revision.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* ── Student Reviews — visible to everyone ── */}
             {!isPreview && (
               <div className="max-w-3xl mx-auto px-6 pb-16">
@@ -1100,6 +1420,19 @@ export default function CourseLearningPage() {
           <div className="lg:hidden fixed inset-0 bg-black/50 z-10" onClick={() => setShowChat(false)} />
         )}
       </div>
+
+      {qcmModal && token && courseId && (
+        <QCMModal
+          token={token}
+          courseId={courseId}
+          sectionId={qcmModal.sectionId}
+          scopeLabel={qcmModal.scopeLabel}
+          onClose={() => {
+            setQcmModal(null)
+            refreshQcmHistory()
+          }}
+        />
+      )}
     </div>
   )
 }

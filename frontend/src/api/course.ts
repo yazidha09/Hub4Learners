@@ -71,6 +71,7 @@ export interface CourseOut {
   description?: string
   thumbnail?: string
   is_free: boolean
+  price: number
   professor_id: string
   professor_name: string
   category_id?: string
@@ -323,6 +324,169 @@ export function markItemCompleted(
 
 export function getCourseAnalytics(token: string): Promise<CourseAnalyticsOut> {
   return request<CourseAnalyticsOut>('/courses/my/analytics', token)
+}
+
+// ── Student analytics ────────────────────────────────────────────────────────
+
+export interface DifficultyStat {
+  attempts: number
+  avg_score_pct: number
+  pass_rate: number
+}
+
+export interface StudentQCMSummary {
+  attempts: number
+  passed: number
+  avg_score_pct: number
+  best_score_pct: number
+  pass_rate: number
+  last_attempt_at?: string | null
+  by_difficulty: Record<string, DifficultyStat>
+}
+
+export interface StudentCourseAnalyticsItem {
+  course_id: string
+  course_title: string
+  thumbnail?: string | null
+  professor_name: string
+  category_name?: string | null
+  enrollment_status: string
+  enrolled_at: string
+  progress_pct: number
+  completed_items: number
+  total_items: number
+  quiz: StudentQCMSummary
+}
+
+export interface StudentRecentAttempt {
+  attempt_id: string
+  course_id: string
+  course_title: string
+  section_id?: string | null
+  difficulty: string
+  score: number
+  total: number
+  score_pct: number
+  passed: boolean
+  completed_at: string
+}
+
+export interface StudentActivityPoint {
+  date: string
+  lessons_completed: number
+  quizzes_taken: number
+}
+
+export interface CourseHighlight {
+  course_id: string
+  course_title: string
+  avg_score_pct: number
+  attempts: number
+}
+
+export interface StudentAnalyticsOut {
+  courses: StudentCourseAnalyticsItem[]
+  total_courses: number
+  total_completed: number
+  total_in_progress: number
+  total_not_started: number
+  overall_progress_pct: number
+
+  total_quiz_attempts: number
+  quizzes_passed: number
+  overall_quiz_avg_pct: number
+  overall_quiz_pass_rate: number
+  best_quiz_score_pct: number
+  difficulty_breakdown: Record<string, DifficultyStat>
+
+  activity_trend: StudentActivityPoint[]
+  lessons_completed_30d: number
+  quizzes_taken_30d: number
+  active_days_30d: number
+  current_streak_days: number
+  longest_streak_days: number
+
+  recent_attempts: StudentRecentAttempt[]
+  strongest_course?: CourseHighlight | null
+  needs_work_course?: CourseHighlight | null
+}
+
+export function getStudentAnalytics(token: string): Promise<StudentAnalyticsOut> {
+  return request<StudentAnalyticsOut>('/courses/student/analytics', token)
+}
+
+// ── Professor learner analytics ──────────────────────────────────────────────
+
+export interface LearnerCourseStats {
+  course_id: string
+  course_title: string
+  enrollment_status: string
+  enrolled_at: string
+  progress_pct: number
+  completed_items: number
+  total_items: number
+  quiz_attempts: number
+  quiz_avg_pct: number
+  quiz_pass_rate: number
+  last_active_at?: string | null
+}
+
+export interface LearnerSummary {
+  student_id: string
+  full_name: string
+  email: string
+  courses_enrolled: number
+  courses_completed: number
+  courses_in_progress: number
+  avg_progress_pct: number
+  quiz_attempts: number
+  quizzes_passed: number
+  quiz_avg_pct: number
+  quiz_pass_rate: number
+  best_quiz_score_pct: number
+  last_active_at?: string | null
+  active_days_30d: number
+  risk_level: 'on_track' | 'needs_attention' | 'at_risk'
+  courses: LearnerCourseStats[]
+}
+
+export interface LearnerActivityPoint {
+  date: string
+  lessons_completed: number
+  quizzes_taken: number
+}
+
+export interface LearnerHighlight {
+  student_id: string
+  full_name: string
+  avg_quiz_pct: number
+  avg_progress_pct: number
+  quiz_attempts: number
+}
+
+export interface LearnerAnalyticsOut {
+  learners: LearnerSummary[]
+  total_learners: number
+  active_learners_30d: number
+  avg_progress_pct: number
+  completed_count: number
+  in_progress_count: number
+  not_started_count: number
+  total_quiz_attempts: number
+  overall_quiz_avg_pct: number
+  overall_quiz_pass_rate: number
+  difficulty_breakdown: Record<string, DifficultyStat>
+  activity_trend: LearnerActivityPoint[]
+  lessons_completed_30d: number
+  quizzes_taken_30d: number
+  top_performers: LearnerHighlight[]
+  needs_attention: LearnerHighlight[]
+  at_risk_count: number
+  needs_attention_count: number
+}
+
+export function getLearnerAnalytics(token: string): Promise<LearnerAnalyticsOut> {
+  return request<LearnerAnalyticsOut>('/courses/professor/learners/analytics', token)
 }
 
 // ── Feedback ─────────────────────────────────────────────────────────────────

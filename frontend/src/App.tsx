@@ -4,6 +4,7 @@ import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import DashboardPage from './pages/DashboardPage'
 import CourseLearningPage from './pages/CourseLearningPage'
+import { PaymentSuccessPage, PaymentCancelPage } from './pages/PaymentResultPage'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import LoadingScreen from './components/LoadingScreen'
 
@@ -29,6 +30,8 @@ export default function App() {
           <Route path="/register" element={<PublicRoute><RegisterPage /></PublicRoute>} />
           <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
           <Route path="/learn/:courseId" element={<PrivateRoute><CourseLearningPage /></PrivateRoute>} />
+          <Route path="/payment/success" element={<PrivateRoute><PaymentSuccessPage /></PrivateRoute>} />
+          <Route path="/payment/cancel" element={<PrivateRoute><PaymentCancelPage /></PrivateRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

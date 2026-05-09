@@ -5,10 +5,11 @@ import { useAuth } from '../context/AuthContext'
 import DashboardLayout, { type NavItem } from '../components/DashboardLayout'
 import {
   listPublishedCourses, getCourseDetail, getEnrolledCourses, enrollInCourse, unenrollFromCourse,
-  getCourseFeedback, getCourseFeedbackSummaries,
-  type CourseOut, type FeedbackOut,
+  getCourseFeedback, getCourseFeedbackSummaries, getStudentAnalytics,
+  type CourseOut, type FeedbackOut, type StudentAnalyticsOut, type StudentActivityPoint,
 } from '../api/course'
 import { listCategories, type CategoryOut } from '../api/category'
+import { createCheckoutSession } from '../api/payment'
 import { sendChatRequest, getMyChatRequests, type ChatRequestOut } from '../api/chat'
 import ChatRoom from '../components/ChatRoom'
 import FriendsMessenger from '../components/FriendsMessenger'
@@ -71,8 +72,6 @@ const BASE_NAV: NavItem[] = [
   { id: 'grades', label: 'Grades', icon: <ChartIcon /> },
 ]
 const ANNOUNCEMENTS_NAV_ITEM: NavItem = { id: 'announcements', label: 'Announcements', icon: <MegaphoneIcon /> }
-
-const ACCENT_COLORS = ['#FF5533', '#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EC4899', '#06B6D4']
 
 function getGreeting() {
   const h = new Date().getHours()
@@ -344,7 +343,13 @@ function BrowseCoursesSection({ token }: { token: string }) {
 
   const handleEnroll = async (courseId: string) => {
     setErr(''); setEnrollingId(courseId)
+    const course = courses.find(c => c.id === courseId)
     try {
+      if (course && !course.is_free) {
+        const session = await createCheckoutSession(token, courseId)
+        window.location.href = session.url
+        return
+      }
       await enrollInCourse(token, courseId)
       await load()
     } catch (e: any) { setErr(e.message) } finally { setEnrollingId(null) }
@@ -401,18 +406,52 @@ function BrowseCoursesSection({ token }: { token: string }) {
                 </div>
               </div>
               {!isEnrolled ? (
-                <button onClick={() => handleEnroll(selected.id)} disabled={!!enrollingId}
-                  className="px-6 py-3 bg-gradient-to-r from-[#FF5533] to-[#e5482b] text-white text-sm font-semibold rounded-xl border-none cursor-pointer shadow-lg shadow-orange-500/25 hover:shadow-orange-500/40 hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 transition-all duration-300 shrink-0">
-                  {enrollingId === selected.id ? (
-                    <span className="flex items-center gap-2">
-                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                      </svg>
-                      Enrolling...
-                    </span>
-                  ) : 'Enroll for free'}
-                </button>
+                selected.is_free ? (
+                  <button onClick={() => handleEnroll(selected.id)} disabled={!!enrollingId}
+                    className="px-6 py-3 bg-gradient-to-r from-[#FF5533] to-[#e5482b] text-white text-sm font-semibold rounded-xl border-none cursor-pointer shadow-lg shadow-orange-500/25 hover:shadow-orange-500/40 hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 transition-all duration-300 shrink-0">
+                    {enrollingId === selected.id ? (
+                      <span className="flex items-center gap-2">
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Enrolling...
+                      </span>
+                    ) : 'Enroll for free'}
+                  </button>
+                ) : (
+                  <div className="shrink-0 flex flex-col items-end gap-2 min-w-[200px]">
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-3xl font-bold text-slate-900 tabular-nums tracking-tight">${Number(selected.price).toFixed(0)}</span>
+                      <span className="text-xs font-medium text-slate-400">USD</span>
+                    </div>
+                    <button
+                      onClick={() => handleEnroll(selected.id)}
+                      disabled={!!enrollingId}
+                      className="w-full inline-flex items-center justify-center gap-2 px-6 h-11 bg-slate-900 text-white text-sm font-semibold rounded-xl border-none cursor-pointer hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                    >
+                      {enrollingId === selected.id ? (
+                        <>
+                          <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          Redirecting…
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0110 0v4" />
+                          </svg>
+                          Enroll · Pay securely
+                        </>
+                      )}
+                    </button>
+                    <p className="text-[11px] text-slate-400 leading-tight text-right">
+                      Lifetime access · Powered by Stripe
+                    </p>
+                  </div>
+                )
               ) : (
                 <span className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-sm font-semibold border border-emerald-200">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
@@ -731,7 +770,11 @@ function BrowseCoursesSection({ token }: { token: string }) {
               <div className="p-5">
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <h3 className="font-semibold text-slate-900 leading-snug line-clamp-2 group-hover:text-[#FF5533] transition-colors duration-200">{c.title}</h3>
-                  <span className="shrink-0 text-[10px] font-bold px-2 py-1 rounded-full bg-blue-50 text-blue-600 uppercase tracking-wide">Free</span>
+                  {c.is_free ? (
+                    <span className="shrink-0 text-[10px] font-bold px-2 py-1 rounded-full bg-blue-50 text-blue-600 uppercase tracking-wide">Free</span>
+                  ) : (
+                    <span className="shrink-0 text-sm font-bold text-slate-900 tabular-nums leading-none mt-0.5">${Number(c.price).toFixed(0)}</span>
+                  )}
                 </div>
                 {c.category_name && (
                   <span className="inline-block text-[10px] font-semibold text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full mb-2">{c.category_name}</span>
@@ -774,8 +817,12 @@ function BrowseCoursesSection({ token }: { token: string }) {
                     <button
                       onClick={e => { e.stopPropagation(); handleEnroll(c.id) }}
                       disabled={!!enrollingId}
-                      className="px-3.5 py-1.5 text-xs font-semibold bg-gradient-to-r from-[#FF5533] to-[#e5482b] text-white rounded-lg border-none cursor-pointer shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200">
-                      {enrollingId === c.id ? '...' : 'Enroll'}
+                      className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg border-none cursor-pointer shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 ${
+                        c.is_free
+                          ? 'bg-gradient-to-r from-[#FF5533] to-[#e5482b] text-white'
+                          : 'bg-slate-900 text-white hover:bg-slate-800'
+                      }`}>
+                      {enrollingId === c.id ? '...' : (c.is_free ? 'Enroll' : 'Buy now')}
                     </button>
                   )}
                 </div>
@@ -842,89 +889,70 @@ function MyCoursesSection({ token, onNavigate }: { token: string; onNavigate: (i
     },
   }
 
-  const cardGradients = [
-    'from-[#FF5533] to-[#FF8566]',
-    'from-blue-500 to-blue-400',
-    'from-purple-500 to-purple-400',
-    'from-emerald-500 to-emerald-400',
-    'from-amber-500 to-amber-400',
-    'from-pink-500 to-pink-400',
-  ]
-
   if (selected) {
-    const gradient = cardGradients[selected.title.charCodeAt(0) % cardGradients.length]
     return (
       <div className="max-w-[820px] animate-fadeIn">
         <button onClick={() => setSelected(null)}
-          className="group inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-900 mb-6 bg-transparent border-none cursor-pointer p-0 transition-all duration-200">
-          <svg className="w-4 h-4 transition-transform duration-200 group-hover:-translate-x-1" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          className="group inline-flex items-center gap-2 text-[0.82rem] font-semibold text-[#64748B] hover:text-[#0C0C0F] mb-6 bg-transparent border-none cursor-pointer p-0 transition-colors">
+          <svg className="w-4 h-4 transition-transform duration-200 group-hover:-translate-x-0.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
-          Back to my courses
+          Back to my learning
         </button>
 
-        {/* Course Hero Card */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.07)] overflow-hidden mb-5">
-          <div className={`relative h-44 bg-gradient-to-r ${gradient}`}>
-            {selected.thumbnail ? (
+        {/* Course Header */}
+        <div className="bg-white rounded-xl border border-[#E5E7EB] overflow-hidden mb-5">
+          {selected.thumbnail ? (
+            <div className="aspect-[16/6] bg-[#F1F3F5] overflow-hidden">
               <img src={`http://localhost:8000/uploads/${selected.thumbnail}`} alt={selected.title} className="w-full h-full object-cover" />
-            ) : (
-              <div className="absolute inset-0 flex items-center justify-center opacity-20">
-                <svg className="w-24 h-24 text-white" fill="none" stroke="currentColor" strokeWidth="0.8" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-                </svg>
-              </div>
-            )}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
-            <div className="absolute bottom-4 left-5 right-5">
-              <h2 className="text-xl font-bold text-white tracking-tight drop-shadow mb-1">{selected.title}</h2>
-              <div className="flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center text-white text-[10px] font-bold">
-                  {selected.professor_name.charAt(0).toUpperCase()}
-                </span>
-                <span className="text-sm text-white/85">{selected.professor_name}</span>
-                <span className="text-white/50 text-xs">·</span>
-                <span className="text-xs text-white/70">{selected.sections_count} section{selected.sections_count !== 1 ? 's' : ''}</span>
-              </div>
             </div>
-          </div>
+          ) : null}
 
-          <div className="px-6 py-5">
+          <div className="p-6">
+            <p className="text-[0.62rem] font-bold tracking-[0.14em] uppercase text-[#94A3B8] mb-2">Enrolled course</p>
+            <h2 className="text-[1.4rem] font-semibold text-[#0C0C0F] tracking-[-0.02em] leading-tight mb-2">{selected.title}</h2>
+            <div className="flex items-center gap-3 text-[0.8rem] text-[#64748B]">
+              <span className="w-6 h-6 rounded-full bg-[#0C0C0F] text-white flex items-center justify-center text-[0.66rem] font-semibold">
+                {selected.professor_name.charAt(0).toUpperCase()}
+              </span>
+              <span>{selected.professor_name}</span>
+              <span className="text-[#CBD5E1]">·</span>
+              <span>{selected.sections_count} section{selected.sections_count !== 1 ? 's' : ''}</span>
+            </div>
+
             {selected.description && (
-              <p className="text-sm text-slate-600 leading-relaxed mb-4">{selected.description}</p>
+              <p className="text-[0.86rem] text-[#64748B] leading-relaxed mt-4">{selected.description}</p>
             )}
-            <div className="flex flex-wrap items-center gap-3">
+
+            <div className="mt-6 flex flex-wrap items-center gap-2">
               <button onClick={() => navigate(`/learn/${selected.id}`)}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#0C0C0F] text-white rounded-xl text-sm font-semibold hover:bg-[#1E1E23] transition-colors duration-200 shadow-sm">
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                className="inline-flex items-center gap-2 h-10 px-5 bg-[#0C0C0F] text-white rounded-lg text-[0.84rem] font-semibold hover:bg-[#1E1E23] transition-colors border-none cursor-pointer">
+                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
                   <polygon points="5 3 19 12 5 21 5 3" />
                 </svg>
-                Start Learning
+                Start learning
               </button>
               {confirmUnenroll === selected.id ? (
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-500">Remove this course?</span>
                   <button onClick={() => handleUnenroll(selected.id)} disabled={unenrolling}
-                    className="px-3 py-1.5 text-xs font-semibold text-white bg-red-500 hover:bg-red-600 rounded-lg border-none cursor-pointer disabled:opacity-50 transition-colors">
-                    {unenrolling ? 'Removing...' : 'Yes, remove'}
+                    className="h-10 px-4 text-[0.8rem] font-semibold text-white bg-red-500 hover:bg-red-600 rounded-lg border-none cursor-pointer disabled:opacity-50 transition-colors">
+                    {unenrolling ? 'Removing…' : 'Confirm remove'}
                   </button>
                   <button onClick={() => { setConfirmUnenroll(null); setUnenrollErr('') }}
-                    className="px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg border-none cursor-pointer transition-colors">
+                    className="h-10 px-3 text-[0.8rem] font-semibold text-[#64748B] bg-white border border-[#E5E7EB] hover:border-[#0C0C0F] rounded-lg cursor-pointer transition-colors">
                     Cancel
                   </button>
                 </div>
               ) : (
                 <button onClick={() => setConfirmUnenroll(selected.id)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold text-red-500 bg-red-50 hover:bg-red-100 rounded-xl border border-red-100 cursor-pointer transition-colors">
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                  Remove
+                  className="inline-flex items-center gap-1.5 h-10 px-4 text-[0.82rem] font-semibold text-[#64748B] bg-white border border-[#E5E7EB] hover:border-[#0C0C0F] hover:text-[#0C0C0F] rounded-lg cursor-pointer transition-colors">
+                  Unenroll
                 </button>
               )}
-              {unenrollErr && <p className="text-xs text-red-500">{unenrollErr}</p>}
+              {unenrollErr && <p className="text-xs text-red-500 ml-2">{unenrollErr}</p>}
             </div>
-            <div className="mt-4 pt-4 border-t border-slate-100">
+
+            <div className="mt-5 pt-5 border-t border-[#F1F3F5]">
               <RequestChatInline token={token} professorId={selected.professor_id} professorName={selected.professor_name} />
             </div>
           </div>
@@ -932,77 +960,72 @@ function MyCoursesSection({ token, onNavigate }: { token: string; onNavigate: (i
 
         {/* Course Sections Accordion */}
         {selected.sections.length === 0 ? (
-          <div className="text-center py-16 bg-white rounded-2xl border border-dashed border-slate-200">
-            <div className="w-12 h-12 mx-auto mb-4 bg-slate-100 rounded-xl flex items-center justify-center">
-              <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
-              </svg>
-            </div>
-            <p className="text-sm font-medium text-slate-900 mb-1">No content yet</p>
-            <p className="text-xs text-slate-500">The instructor hasn't added any materials</p>
+          <div className="text-center py-14 bg-white rounded-xl border border-dashed border-[#E5E7EB]">
+            <p className="text-[0.88rem] font-medium text-[#0C0C0F] mb-1">No content yet</p>
+            <p className="text-[0.78rem] text-[#94A3B8]">The instructor hasn't added any materials.</p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {selected.sections.map((section, idx) => {
               const isOpen = expandedSection === section.id
               return (
-                <div key={section.id} className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_2px_8px_rgba(0,0,0,0.04)] overflow-hidden">
+                <div key={section.id} className="bg-white rounded-xl border border-[#E5E7EB] overflow-hidden">
                   <button
                     onClick={() => setExpandedSection(isOpen ? null : section.id)}
-                    className="w-full px-5 py-4 flex items-center gap-3 hover:bg-slate-50/50 transition-colors duration-200 cursor-pointer"
+                    className="w-full px-5 py-4 flex items-center gap-3 hover:bg-[#FAFAFA] transition-colors cursor-pointer bg-transparent border-none"
                   >
-                    <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 transition-colors duration-200 ${isOpen ? 'bg-[#0C0C0F] text-white' : 'bg-slate-100 text-slate-600'}`}>
+                    <span className={`w-7 h-7 rounded-md flex items-center justify-center text-[0.78rem] font-semibold shrink-0 transition-colors ${isOpen ? 'bg-[#0C0C0F] text-white' : 'bg-[#F1F3F5] text-[#64748B]'}`}>
                       {idx + 1}
                     </span>
-                    <span className="font-semibold text-slate-900 flex-1 text-left text-[0.9rem]">{section.title}</span>
-                    <span className="text-xs text-slate-400 bg-slate-100 px-2.5 py-1 rounded-full shrink-0">
+                    <span className="font-semibold text-[#0C0C0F] flex-1 text-left text-[0.88rem]">{section.title}</span>
+                    <span className="text-[0.7rem] text-[#94A3B8] shrink-0">
                       {section.subsections.length + section.materials.length} item{(section.subsections.length + section.materials.length) !== 1 ? 's' : ''}
                     </span>
-                    <svg className={`w-4 h-4 text-slate-400 transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <svg className={`w-4 h-4 text-[#94A3B8] transition-transform shrink-0 ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
                     </svg>
                   </button>
 
                   {isOpen && (section.subsections.length > 0 || section.materials.length > 0) && (
-                    <div className="border-t border-slate-100">
+                    <div className="border-t border-[#F1F3F5]">
                       {section.subsections.map((sub, subIdx) => (
-                        <div key={sub.id} className={subIdx > 0 ? 'border-t border-slate-50' : ''}>
-                          <div className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50/50 transition-colors duration-200">
-                            <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
-                              <svg className="w-4.5 h-4.5 text-blue-500" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24" style={{width:'18px',height:'18px'}}>
+                        <div key={sub.id} className={subIdx > 0 ? 'border-t border-[#F1F3F5]' : ''}>
+                          <div className="flex items-center gap-4 px-5 py-3.5">
+                            <div className="w-8 h-8 rounded-md bg-[#F1F3F5] flex items-center justify-center shrink-0">
+                              <svg className="w-4 h-4 text-[#64748B]" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
                               </svg>
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium text-slate-900 truncate">{sub.title}</div>
-                              <div className="text-[10px] font-bold uppercase tracking-wider mt-0.5 text-blue-500">Lesson</div>
+                              <div className="text-[0.85rem] font-medium text-[#0C0C0F] truncate">{sub.title}</div>
+                              <div className="text-[0.66rem] font-semibold uppercase tracking-[0.08em] mt-0.5 text-[#94A3B8]">Lesson</div>
                             </div>
                           </div>
                         </div>
                       ))}
                       {section.materials.map((m, mIdx) => {
-                        const cfg = typeConfig[m.type] ?? { icon: null, color: 'text-slate-600', bg: 'bg-slate-100', label: m.type.toUpperCase() }
+                        const cfg = typeConfig[m.type] ?? { icon: null, color: 'text-[#64748B]', bg: 'bg-[#F1F3F5]', label: m.type.toUpperCase() }
                         return (
-                          <div key={m.id} className={mIdx > 0 || section.subsections.length > 0 ? 'border-t border-slate-50' : ''}>
-                            <div className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50/50 transition-colors duration-200">
-                              <div className={`w-9 h-9 rounded-xl ${cfg.bg} flex items-center justify-center shrink-0`}>
+                          <div key={m.id} className={mIdx > 0 || section.subsections.length > 0 ? 'border-t border-[#F1F3F5]' : ''}>
+                            <div className="flex items-center gap-4 px-5 py-3.5">
+                              <div className={`w-8 h-8 rounded-md ${cfg.bg} flex items-center justify-center shrink-0`}>
                                 <span className={cfg.color}>{cfg.icon}</span>
                               </div>
                               <div className="flex-1 min-w-0">
-                                <div className="text-sm font-medium text-slate-900 truncate">{m.title}</div>
-                                <div className={`text-[10px] font-bold uppercase tracking-wider mt-0.5 ${cfg.color}`}>{cfg.label}</div>
+                                <div className="text-[0.85rem] font-medium text-[#0C0C0F] truncate">{m.title}</div>
+                                <div className={`text-[0.66rem] font-semibold uppercase tracking-[0.08em] mt-0.5 ${cfg.color}`}>{cfg.label}</div>
                               </div>
                               {m.type === 'pdf' && m.content_text && (
                                 <button
                                   onClick={() => setExpandedMaterial(expandedMaterial === m.id ? null : m.id)}
-                                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors duration-200 border-none cursor-pointer whitespace-nowrap">
+                                  className="h-8 px-3 text-[0.74rem] font-semibold text-[#0C0C0F] bg-white border border-[#E5E7EB] hover:border-[#0C0C0F] rounded-lg transition-colors cursor-pointer whitespace-nowrap">
                                   {expandedMaterial === m.id ? 'Close' : 'Read'}
                                 </button>
                               )}
                             </div>
                             {expandedMaterial === m.id && m.content_text && (
-                              <div className="px-6 py-5 bg-slate-50 border-t border-slate-100">
-                                <div className="prose-sm max-w-none text-slate-700 leading-relaxed [&>h1]:text-xl [&>h1]:font-bold [&>h1]:mb-3 [&>h2]:text-lg [&>h2]:font-semibold [&>h2]:mb-2 [&>h3]:text-base [&>h3]:font-semibold [&>h3]:mb-1.5 [&>p]:mb-3 [&>p]:text-[0.875rem] [&>ul]:list-disc [&>ul]:pl-5 [&>ul]:mb-3 [&>ol]:list-decimal [&>ol]:pl-5 [&>ol]:mb-3 [&>li]:mb-1">
+                              <div className="px-6 py-5 bg-[#FAFAFA] border-t border-[#F1F3F5]">
+                                <div className="prose-sm max-w-none text-[#0C0C0F] leading-relaxed [&>h1]:text-xl [&>h1]:font-bold [&>h1]:mb-3 [&>h2]:text-lg [&>h2]:font-semibold [&>h2]:mb-2 [&>h3]:text-base [&>h3]:font-semibold [&>h3]:mb-1.5 [&>p]:mb-3 [&>p]:text-[0.875rem] [&>ul]:list-disc [&>ul]:pl-5 [&>ul]:mb-3 [&>ol]:list-decimal [&>ol]:pl-5 [&>ol]:mb-3 [&>li]:mb-1">
                                   <Markdown>{m.content_text}</Markdown>
                                 </div>
                               </div>
@@ -1022,72 +1045,68 @@ function MyCoursesSection({ token, onNavigate }: { token: string; onNavigate: (i
   }
 
   return (
-    <div className="max-w-[900px] animate-fadeIn">
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold text-[#0C0C0F] tracking-tight">My Learning</h2>
-        <p className="text-sm text-[#94A3B8] mt-1">Continue where you left off</p>
+    <div className="max-w-[1080px] animate-fadeIn">
+      <div className="mb-8 flex items-end justify-between flex-wrap gap-4">
+        <div>
+          <h2 className="text-[1.6rem] font-semibold tracking-[-0.02em] text-[#0C0C0F]">My learning</h2>
+          <p className="text-[0.86rem] text-[#64748B] mt-1">Pick up where you left off.</p>
+        </div>
+        <span className="text-[0.74rem] font-semibold text-[#64748B] bg-white border border-[#E5E7EB] rounded-md px-2.5 py-1">
+          {enrolled.length} course{enrolled.length !== 1 ? 's' : ''}
+        </span>
       </div>
 
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-60 rounded-2xl skeleton" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="h-64 rounded-xl skeleton" />
           ))}
         </div>
       ) : enrolled.length === 0 ? (
-        <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-200">
-          <div className="w-16 h-16 mx-auto mb-4 bg-slate-100 rounded-2xl flex items-center justify-center">
-            <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5" />
-            </svg>
-          </div>
-          <p className="text-lg font-semibold text-slate-900 mb-1">No courses yet</p>
-          <p className="text-sm text-slate-500 mb-5">Enroll in a course to start learning</p>
+        <div className="text-center py-20 bg-white rounded-xl border border-dashed border-[#E5E7EB]">
+          <p className="text-[1rem] font-semibold text-[#0C0C0F] mb-1">No courses yet</p>
+          <p className="text-[0.86rem] text-[#64748B] mb-6">Enroll in a course to start learning.</p>
           <button onClick={() => onNavigate('courses')}
-            className="px-5 py-2.5 text-sm font-semibold text-white bg-[#0C0C0F] rounded-xl hover:bg-[#1E1E23] transition-colors duration-200">
-            Browse Courses
+            className="h-10 px-5 text-[0.84rem] font-semibold text-white bg-[#0C0C0F] rounded-lg hover:bg-[#1E1E23] transition-colors border-none cursor-pointer">
+            Browse courses
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 stagger-children">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 stagger-children">
           {enrolled.map(c => {
-            const gradient = cardGradients[c.title.charCodeAt(0) % cardGradients.length]
+            const pct = c.progress_pct ?? 0
+            const isDone = c.enrollment_status === 'completed'
             return (
-              <div key={c.id} className="group bg-white rounded-2xl border border-slate-200/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] hover:shadow-[0_12px_40px_rgba(0,0,0,0.1)] hover:border-slate-300 transition-all duration-300 overflow-hidden flex flex-col">
-                {/* Card Banner */}
+              <div key={c.id} className="group bg-white rounded-xl border border-[#E5E7EB] overflow-hidden flex flex-col transition-all hover:border-[#0C0C0F] hover:shadow-[0_8px_24px_rgba(12,12,15,0.06)]">
+                {/* Thumbnail */}
                 <div
-                  className={`relative h-36 bg-gradient-to-r ${gradient} cursor-pointer overflow-hidden`}
+                  className="relative aspect-[16/9] cursor-pointer overflow-hidden bg-[#0C0C0F]"
                   onClick={async () => { const full = await getCourseDetail(c.id); setSelected(full) }}
                 >
                   {c.thumbnail ? (
                     <img src={`http://localhost:8000/uploads/${c.thumbnail}`} alt={c.title}
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03]" />
                   ) : (
-                    <div className="absolute inset-0 flex items-center justify-center opacity-20">
-                      <svg className="w-20 h-20 text-white" fill="none" stroke="currentColor" strokeWidth="0.8" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-                      </svg>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-white/90 text-[2.5rem] font-semibold tracking-tight">{c.title.charAt(0).toUpperCase()}</span>
                     </div>
                   )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
 
-                  {/* Remove button */}
                   <div className="absolute top-2.5 right-2.5" onClick={e => e.stopPropagation()}>
                     {confirmUnenroll === c.id ? (
-                      <div className="flex items-center gap-1 bg-white rounded-xl shadow-lg px-2 py-1">
-                        <span className="text-[10px] text-slate-600 font-medium">Remove?</span>
+                      <div className="flex items-center gap-1 bg-white rounded-lg shadow-md p-1 border border-[#E5E7EB]">
                         <button onClick={() => handleUnenroll(c.id)} disabled={unenrolling}
-                          className="px-2 py-0.5 text-[10px] font-bold text-white bg-red-500 hover:bg-red-600 rounded-md border-none cursor-pointer transition-colors">
-                          {unenrolling ? '...' : 'Yes'}
+                          className="px-2 py-1 text-[0.68rem] font-semibold text-white bg-red-500 hover:bg-red-600 rounded-md border-none cursor-pointer transition-colors">
+                          {unenrolling ? '…' : 'Remove'}
                         </button>
                         <button onClick={() => setConfirmUnenroll(null)}
-                          className="px-2 py-0.5 text-[10px] font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-md border-none cursor-pointer transition-colors">
-                          No
+                          className="px-2 py-1 text-[0.68rem] font-semibold text-[#64748B] bg-[#F1F3F5] hover:bg-[#E5E7EB] rounded-md border-none cursor-pointer transition-colors">
+                          Cancel
                         </button>
                       </div>
                     ) : (
                       <button onClick={() => setConfirmUnenroll(c.id)}
-                        className="w-7 h-7 rounded-lg bg-black/30 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white hover:bg-black/50 border-none cursor-pointer transition-all duration-200"
+                        className="w-7 h-7 rounded-md bg-white/90 backdrop-blur-sm flex items-center justify-center text-[#64748B] hover:text-red-500 border-none cursor-pointer transition-colors opacity-0 group-hover:opacity-100"
                         title="Remove course">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -1095,49 +1114,55 @@ function MyCoursesSection({ token, onNavigate }: { token: string; onNavigate: (i
                       </button>
                     )}
                   </div>
-
-                  {/* Section count badge */}
-                  <span className="absolute bottom-2.5 left-3 text-[10px] font-semibold text-white/90 bg-black/30 backdrop-blur-sm px-2 py-0.5 rounded-full">
-                    {c.sections_count} section{c.sections_count !== 1 ? 's' : ''}
-                  </span>
                 </div>
 
-                {/* Card Body */}
+                {/* Body */}
                 <div className="p-4 flex flex-col flex-1">
                   <h3
-                    className="font-bold text-[#0C0C0F] leading-snug mb-2 line-clamp-2 cursor-pointer group-hover:text-[#FF5533] transition-colors duration-200 text-[0.92rem]"
+                    className="text-[0.92rem] font-semibold text-[#0C0C0F] leading-snug mb-1.5 line-clamp-2 cursor-pointer group-hover:text-[#FF5533] transition-colors"
                     onClick={async () => { const full = await getCourseDetail(c.id); setSelected(full) }}
                   >{c.title}</h3>
+                  <p className="text-[0.76rem] text-[#94A3B8] truncate mb-4">{c.professor_name}</p>
 
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="w-5 h-5 rounded-full bg-gradient-to-br from-slate-600 to-slate-900 flex items-center justify-center text-white text-[9px] font-bold shrink-0">
-                      {c.professor_name.charAt(0).toUpperCase()}
-                    </span>
-                    <span className="text-xs text-[#94A3B8] truncate">{c.professor_name}</span>
-                  </div>
+                  {/* Progress */}
+                  {isDone ? (
+                    <div className="mb-4 inline-flex items-center gap-1 text-[0.72rem] font-semibold text-emerald-600">
+                      <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                      Completed
+                    </div>
+                  ) : pct > 0 ? (
+                    <div className="mb-4">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[0.7rem] font-semibold text-[#64748B]">Progress</span>
+                        <span className="text-[0.7rem] font-semibold text-[#0C0C0F] tabular-nums">{pct}%</span>
+                      </div>
+                      <div className="w-full h-1 bg-[#F1F3F5] rounded-full overflow-hidden">
+                        <div className="h-full bg-[#FF5533] rounded-full" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mb-4 text-[0.72rem] text-[#94A3B8]">{c.sections_count} section{c.sections_count !== 1 ? 's' : ''}</p>
+                  )}
 
-                  <div className="flex items-center gap-1.5 mb-4">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="text-xs font-semibold text-emerald-600">Active</span>
-                  </div>
-
-                  <div className="mt-auto flex gap-2">
+                  <div className="mt-auto flex items-center gap-2">
                     <button
                       onClick={() => navigate(`/learn/${c.id}`)}
-                      className="flex-1 h-9 bg-[#0C0C0F] text-white text-xs font-semibold rounded-xl hover:bg-[#1E1E23] transition-colors duration-200 flex items-center justify-center gap-1.5 shadow-sm">
-                      <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                      className="flex-1 h-9 bg-[#0C0C0F] text-white text-[0.78rem] font-semibold rounded-lg hover:bg-[#1E1E23] transition-colors flex items-center justify-center gap-1.5 border-none cursor-pointer">
+                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
                         <polygon points="5 3 19 12 5 21 5 3" />
                       </svg>
-                      Continue
+                      {pct > 0 && !isDone ? 'Continue' : isDone ? 'Review' : 'Start'}
                     </button>
                     <button
                       onClick={async () => { const full = await getCourseDetail(c.id); setSelected(full) }}
-                      className="h-9 px-3 bg-slate-100 text-slate-600 text-xs font-semibold rounded-xl hover:bg-slate-200 transition-colors duration-200 flex items-center justify-center gap-1 whitespace-nowrap">
+                      className="h-9 w-9 bg-white text-[#64748B] hover:text-[#0C0C0F] border border-[#E5E7EB] hover:border-[#0C0C0F] rounded-lg transition-colors flex items-center justify-center cursor-pointer"
+                      title="Course details">
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v.01M12 12v6" />
+                        <circle cx="12" cy="12" r="9" />
                       </svg>
-                      Details
                     </button>
                   </div>
                 </div>
@@ -1324,6 +1349,527 @@ function AnnouncementsSection({ token, universityName }: { token: string; univer
   )
 }
 
+/* ── Student Analytics ─────────────────────────────────────────────────────── */
+
+function StatCard({ label, value, hint, accent }: { label: string; value: string | number; hint?: string; accent?: string }) {
+  return (
+    <div className="bg-white border border-[#E5E7EB] rounded-2xl px-5 py-4 shadow-[0_4px_20px_rgba(12,12,15,0.04)] relative overflow-hidden">
+      {accent && <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: accent }} />}
+      <p className="text-[0.65rem] font-bold text-[#94A3B8] uppercase tracking-[0.08em] mb-2">{label}</p>
+      <p className="text-[1.7rem] font-black text-[#0C0C0F] leading-none mb-1">{value}</p>
+      {hint && <p className="text-[0.7rem] font-semibold text-[#94A3B8]">{hint}</p>}
+    </div>
+  )
+}
+
+function ActivityChart({ trend }: { trend: StudentActivityPoint[] }) {
+  const W = 720
+  const H = 180
+  const PAD_X = 12
+  const PAD_TOP = 16
+  const PAD_BOTTOM = 24
+  const max = Math.max(1, ...trend.map(t => Math.max(t.lessons_completed, t.quizzes_taken)))
+  const stepX = trend.length > 1 ? (W - PAD_X * 2) / (trend.length - 1) : 0
+  const yOf = (v: number) => PAD_TOP + (1 - v / max) * (H - PAD_TOP - PAD_BOTTOM)
+  const xOf = (i: number) => PAD_X + i * stepX
+  const lessonsPath = trend.map((t, i) => `${i === 0 ? 'M' : 'L'}${xOf(i).toFixed(1)},${yOf(t.lessons_completed).toFixed(1)}`).join(' ')
+  const lessonsArea = `${lessonsPath} L${xOf(trend.length - 1).toFixed(1)},${(H - PAD_BOTTOM).toFixed(1)} L${xOf(0).toFixed(1)},${(H - PAD_BOTTOM).toFixed(1)} Z`
+  const quizPath = trend.map((t, i) => `${i === 0 ? 'M' : 'L'}${xOf(i).toFixed(1)},${yOf(t.quizzes_taken).toFixed(1)}`).join(' ')
+
+  const labelEvery = Math.max(1, Math.floor(trend.length / 6))
+  const fmtDay = (s: string) => {
+    const d = new Date(s)
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  }
+
+  return (
+    <div className="w-full overflow-x-auto">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-[180px] min-w-[480px]">
+        <defs>
+          <linearGradient id="lessons-area" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#FF5533" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="#FF5533" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {[0.25, 0.5, 0.75, 1].map(f => (
+          <line key={f} x1={PAD_X} x2={W - PAD_X} y1={PAD_TOP + (H - PAD_TOP - PAD_BOTTOM) * f} y2={PAD_TOP + (H - PAD_TOP - PAD_BOTTOM) * f} stroke="#F1F3F5" strokeWidth="1" />
+        ))}
+        <path d={lessonsArea} fill="url(#lessons-area)" />
+        <path d={lessonsPath} fill="none" stroke="#FF5533" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={quizPath} fill="none" stroke="#3B82F6" strokeWidth="2" strokeDasharray="4 4" strokeLinejoin="round" strokeLinecap="round" />
+        {trend.map((t, i) => (i % labelEvery === 0 || i === trend.length - 1) && (
+          <text key={t.date} x={xOf(i)} y={H - 6} textAnchor="middle" fontSize="9" fill="#94A3B8" fontWeight="600">{fmtDay(t.date)}</text>
+        ))}
+      </svg>
+    </div>
+  )
+}
+
+function relTime(iso: string): string {
+  const then = new Date(iso).getTime()
+  const diff = Date.now() - then
+  const m = Math.floor(diff / 60000)
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.floor(h / 24)
+  if (d < 30) return `${d}d ago`
+  const mo = Math.floor(d / 30)
+  if (mo < 12) return `${mo}mo ago`
+  return `${Math.floor(mo / 12)}y ago`
+}
+
+const DIFFICULTY_META: Record<string, { label: string; color: string; bg: string }> = {
+  easy:   { label: 'Easy',   color: '#10B981', bg: '#ECFDF5' },
+  medium: { label: 'Medium', color: '#F59E0B', bg: '#FFFBEB' },
+  hard:   { label: 'Hard',   color: '#EF4444', bg: '#FEF2F2' },
+}
+
+function scoreColor(pct: number): string {
+  if (pct >= 80) return '#10B981'
+  if (pct >= 60) return '#F59E0B'
+  return '#EF4444'
+}
+
+function StudentAnalyticsSection({ token, onJumpToCourses }: { token: string; onJumpToCourses: () => void }) {
+  const [data, setData] = useState<StudentAnalyticsOut | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+  const [sortBy, setSortBy] = useState<'recent' | 'progress' | 'score'>('recent')
+  const [filter, setFilter] = useState<'all' | 'in_progress' | 'completed' | 'not_started'>('all')
+
+  useEffect(() => {
+    setLoading(true); setErr('')
+    getStudentAnalytics(token)
+      .then(setData)
+      .catch(e => setErr(e.message ?? 'Failed to load analytics'))
+      .finally(() => setLoading(false))
+  }, [token])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="w-6 h-6 border-2 border-[#FF5533] border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  if (err) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-2xl px-6 py-8 text-center">
+        <p className="text-[0.88rem] text-red-600">{err}</p>
+      </div>
+    )
+  }
+
+  if (!data || data.total_courses === 0) {
+    return (
+      <div className="bg-white border border-[#E5E7EB] rounded-2xl px-8 py-16 text-center shadow-[0_4px_20px_rgba(12,12,15,0.04)]">
+        <div className="w-14 h-14 mx-auto mb-4 bg-[#F1F3F5] rounded-2xl flex items-center justify-center">
+          <ChartIcon />
+        </div>
+        <p className="text-[0.95rem] font-bold text-[#0C0C0F] mb-1">No learning data yet</p>
+        <p className="text-[0.82rem] text-[#94A3B8] mb-4">Enroll in a course and start a quiz to see your progress here.</p>
+        <button
+          onClick={onJumpToCourses}
+          className="px-4 py-2 bg-[#0C0C0F] text-white text-[0.78rem] font-bold rounded-md border-none cursor-pointer hover:bg-[#1E1E23] transition-colors"
+        >
+          Browse courses
+        </button>
+      </div>
+    )
+  }
+
+  const filtered = data.courses.filter(c => {
+    if (filter === 'completed') return c.enrollment_status === 'completed'
+    if (filter === 'not_started') return c.progress_pct === 0 && c.enrollment_status !== 'completed'
+    if (filter === 'in_progress') return c.progress_pct > 0 && c.enrollment_status !== 'completed'
+    return true
+  })
+
+  const sorted = [...filtered].sort((a, b) => {
+    if (sortBy === 'progress') return b.progress_pct - a.progress_pct
+    if (sortBy === 'score') return b.quiz.avg_score_pct - a.quiz.avg_score_pct
+    return new Date(b.enrolled_at).getTime() - new Date(a.enrolled_at).getTime()
+  })
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="flex items-end justify-between gap-4 mb-6 flex-wrap">
+        <div>
+          <h2 className="text-[1.5rem] font-black text-[#0C0C0F] tracking-tight leading-tight">My Progress</h2>
+          <p className="text-[0.82rem] text-[#94A3B8] mt-0.5">
+            Tracking {data.total_courses} course{data.total_courses === 1 ? '' : 's'} · last 30 days of activity
+          </p>
+        </div>
+        <div className="hidden sm:flex items-center gap-3 text-[0.7rem] font-bold text-[#94A3B8]">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-2.5 h-0.5 bg-[#FF5533]" /> Lessons
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block w-3 border-t-[2px] border-dashed border-[#3B82F6]" /> Quizzes
+          </span>
+        </div>
+      </div>
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <StatCard
+          label="Overall progress"
+          value={`${data.overall_progress_pct}%`}
+          hint={`${data.total_completed} completed · ${data.total_in_progress} active`}
+          accent="#FF5533"
+        />
+        <StatCard
+          label="Quiz average"
+          value={data.total_quiz_attempts > 0 ? `${data.overall_quiz_avg_pct}%` : '—'}
+          hint={`${data.total_quiz_attempts} attempt${data.total_quiz_attempts === 1 ? '' : 's'}`}
+          accent="#3B82F6"
+        />
+        <StatCard
+          label="Pass rate"
+          value={data.total_quiz_attempts > 0 ? `${data.overall_quiz_pass_rate}%` : '—'}
+          hint={`${data.quizzes_passed} passed`}
+          accent="#10B981"
+        />
+        <StatCard
+          label="Current streak"
+          value={`${data.current_streak_days}d`}
+          hint={data.longest_streak_days > 0 ? `Best: ${data.longest_streak_days}d` : '—'}
+          accent="#F59E0B"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        {/* Activity chart */}
+        <div className="lg:col-span-2 bg-white border border-[#E5E7EB] rounded-2xl px-5 py-5 shadow-[0_4px_20px_rgba(12,12,15,0.04)]">
+          <div className="flex items-start justify-between mb-3 flex-wrap gap-3">
+            <div>
+              <p className="text-[0.7rem] font-bold text-[#94A3B8] uppercase tracking-[0.08em]">Learning activity</p>
+              <p className="text-[1.1rem] font-black text-[#0C0C0F] leading-tight">Last 30 days</p>
+            </div>
+            <div className="flex items-end gap-5">
+              <div className="text-right">
+                <p className="text-[1.2rem] font-black text-[#FF5533] leading-none">{data.lessons_completed_30d}</p>
+                <p className="text-[0.66rem] font-semibold text-[#94A3B8] uppercase tracking-wide mt-0.5">lessons</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[1.2rem] font-black text-[#3B82F6] leading-none">{data.quizzes_taken_30d}</p>
+                <p className="text-[0.66rem] font-semibold text-[#94A3B8] uppercase tracking-wide mt-0.5">quizzes</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[1.2rem] font-black text-[#0C0C0F] leading-none">{data.active_days_30d}</p>
+                <p className="text-[0.66rem] font-semibold text-[#94A3B8] uppercase tracking-wide mt-0.5">active days</p>
+              </div>
+            </div>
+          </div>
+          <ActivityChart trend={data.activity_trend} />
+        </div>
+
+        {/* Difficulty breakdown */}
+        <div className="bg-white border border-[#E5E7EB] rounded-2xl px-5 py-5 shadow-[0_4px_20px_rgba(12,12,15,0.04)]">
+          <p className="text-[0.7rem] font-bold text-[#94A3B8] uppercase tracking-[0.08em] mb-3">Quiz performance</p>
+          {data.total_quiz_attempts > 0 ? (
+            <div className="space-y-3">
+              {(['easy', 'medium', 'hard'] as const).map(diff => {
+                const stat = data.difficulty_breakdown[diff] ?? { attempts: 0, avg_score_pct: 0, pass_rate: 0 }
+                const meta = DIFFICULTY_META[diff]
+                return (
+                  <div key={diff}>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[0.6rem] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: meta.bg, color: meta.color }}>
+                          {meta.label}
+                        </span>
+                        <span className="text-[0.7rem] font-semibold text-[#94A3B8]">{stat.attempts} attempt{stat.attempts === 1 ? '' : 's'}</span>
+                      </div>
+                      <span className="text-[0.78rem] font-black tabular-nums" style={{ color: stat.attempts > 0 ? scoreColor(stat.avg_score_pct) : '#94A3B8' }}>
+                        {stat.attempts > 0 ? `${stat.avg_score_pct}%` : '—'}
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-[#F1F3F5] rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all duration-500" style={{ width: `${stat.attempts > 0 ? stat.avg_score_pct : 0}%`, background: meta.color }} />
+                    </div>
+                  </div>
+                )
+              })}
+              <div className="pt-2 border-t border-[#F1F3F5] mt-2">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[0.7rem] font-bold text-[#94A3B8] uppercase tracking-wide">Best score</span>
+                  <span className="text-[1.2rem] font-black tabular-nums" style={{ color: scoreColor(data.best_quiz_score_pct) }}>{data.best_quiz_score_pct}%</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <div className="w-10 h-10 mb-2 rounded-full bg-[#F1F3F5] flex items-center justify-center">
+                <ChartIcon />
+              </div>
+              <p className="text-[0.78rem] font-semibold text-[#0C0C0F]">No quizzes yet</p>
+              <p className="text-[0.7rem] text-[#94A3B8] mt-0.5">Take a quiz inside any course to see your stats.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Highlights + recent attempts */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-8">
+        <div className="bg-white border border-[#E5E7EB] rounded-2xl px-5 py-5 shadow-[0_4px_20px_rgba(12,12,15,0.04)]">
+          <p className="text-[0.7rem] font-bold text-[#94A3B8] uppercase tracking-[0.08em] mb-3">Strongest subject</p>
+          {data.strongest_course ? (
+            <div>
+              <p className="text-[0.95rem] font-black text-[#0C0C0F] truncate">{data.strongest_course.course_title}</p>
+              <div className="flex items-baseline gap-2 mt-2">
+                <span className="text-[2rem] font-black leading-none" style={{ color: scoreColor(data.strongest_course.avg_score_pct) }}>
+                  {data.strongest_course.avg_score_pct}%
+                </span>
+                <span className="text-[0.7rem] font-semibold text-[#94A3B8]">avg over {data.strongest_course.attempts} quiz{data.strongest_course.attempts === 1 ? '' : 'zes'}</span>
+              </div>
+            </div>
+          ) : (
+            <p className="text-[0.78rem] text-[#94A3B8]">Take quizzes to identify your strengths.</p>
+          )}
+        </div>
+
+        <div className="bg-white border border-[#E5E7EB] rounded-2xl px-5 py-5 shadow-[0_4px_20px_rgba(12,12,15,0.04)]">
+          <p className="text-[0.7rem] font-bold text-[#94A3B8] uppercase tracking-[0.08em] mb-3">Needs work</p>
+          {data.needs_work_course ? (
+            <div>
+              <p className="text-[0.95rem] font-black text-[#0C0C0F] truncate">{data.needs_work_course.course_title}</p>
+              <div className="flex items-baseline gap-2 mt-2">
+                <span className="text-[2rem] font-black leading-none" style={{ color: scoreColor(data.needs_work_course.avg_score_pct) }}>
+                  {data.needs_work_course.avg_score_pct}%
+                </span>
+                <span className="text-[0.7rem] font-semibold text-[#94A3B8]">avg over {data.needs_work_course.attempts} quiz{data.needs_work_course.attempts === 1 ? '' : 'zes'}</span>
+              </div>
+            </div>
+          ) : (
+            <p className="text-[0.78rem] text-[#94A3B8]">All courses are looking strong — keep going.</p>
+          )}
+        </div>
+
+        <div className="bg-white border border-[#E5E7EB] rounded-2xl px-5 py-5 shadow-[0_4px_20px_rgba(12,12,15,0.04)]">
+          <p className="text-[0.7rem] font-bold text-[#94A3B8] uppercase tracking-[0.08em] mb-3">Completion mix</p>
+          <div className="flex items-end gap-2 mb-3">
+            <span className="text-[2rem] font-black text-[#0C0C0F] leading-none">{data.total_courses}</span>
+            <span className="text-[0.7rem] font-semibold text-[#94A3B8] mb-1">enrolled</span>
+          </div>
+          <div className="flex h-2 rounded-full overflow-hidden bg-[#F1F3F5] mb-2">
+            {data.total_courses > 0 && (
+              <>
+                <div style={{ width: `${data.total_completed / data.total_courses * 100}%`, background: '#10B981' }} />
+                <div style={{ width: `${data.total_in_progress / data.total_courses * 100}%`, background: '#FF5533' }} />
+                <div style={{ width: `${data.total_not_started / data.total_courses * 100}%`, background: '#94A3B8' }} />
+              </>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-1.5 text-[0.66rem] font-bold">
+            <div className="text-center">
+              <span className="block text-emerald-600 text-[0.95rem] font-black tabular-nums">{data.total_completed}</span>
+              <span className="text-[#94A3B8] uppercase tracking-wide">Done</span>
+            </div>
+            <div className="text-center">
+              <span className="block text-[#FF5533] text-[0.95rem] font-black tabular-nums">{data.total_in_progress}</span>
+              <span className="text-[#94A3B8] uppercase tracking-wide">Active</span>
+            </div>
+            <div className="text-center">
+              <span className="block text-slate-500 text-[0.95rem] font-black tabular-nums">{data.total_not_started}</span>
+              <span className="text-[#94A3B8] uppercase tracking-wide">Not yet</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Recent quiz attempts */}
+      <div className="mb-8">
+        <h3 className="text-[1.05rem] font-black text-[#0C0C0F] mb-3">Recent quiz attempts</h3>
+        {data.recent_attempts.length === 0 ? (
+          <div className="bg-white border border-dashed border-[#E5E7EB] rounded-2xl px-6 py-10 text-center">
+            <p className="text-[0.82rem] text-[#94A3B8]">You haven't taken any quizzes yet.</p>
+          </div>
+        ) : (
+          <div className="bg-white border border-[#E5E7EB] rounded-2xl shadow-[0_4px_20px_rgba(12,12,15,0.04)] divide-y divide-[#F1F3F5]">
+            {data.recent_attempts.map(a => {
+              const meta = DIFFICULTY_META[a.difficulty] ?? DIFFICULTY_META.medium
+              return (
+                <div key={a.attempt_id} className="flex items-center gap-4 px-5 py-3.5">
+                  <div className="w-9 h-9 shrink-0 rounded-xl flex items-center justify-center font-black text-[0.78rem]" style={{ background: a.passed ? '#ECFDF5' : '#FEF2F2', color: a.passed ? '#10B981' : '#EF4444' }}>
+                    {a.passed ? (
+                      <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                    ) : (
+                      <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[0.88rem] font-bold text-[#0C0C0F] truncate">{a.course_title}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[0.6rem] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: meta.bg, color: meta.color }}>
+                        {meta.label}
+                      </span>
+                      <span className="text-[0.7rem] text-[#94A3B8]">{relTime(a.completed_at)}</span>
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-[1.05rem] font-black tabular-nums" style={{ color: scoreColor(a.score_pct) }}>{a.score_pct}%</p>
+                    <p className="text-[0.66rem] font-semibold text-[#94A3B8] tabular-nums">{a.score} / {a.total}</p>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Per-course breakdown */}
+      <div className="flex items-end justify-between gap-3 mb-3 flex-wrap">
+        <h3 className="text-[1.05rem] font-black text-[#0C0C0F]">Course breakdown</h3>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex bg-[#F1F3F5] rounded-lg p-0.5">
+            {([
+              { id: 'all', label: 'All' },
+              { id: 'in_progress', label: 'Active' },
+              { id: 'completed', label: 'Done' },
+              { id: 'not_started', label: 'Not yet' },
+            ] as const).map(f => (
+              <button
+                key={f.id}
+                onClick={() => setFilter(f.id)}
+                className={`px-3 h-7 rounded-md text-[0.7rem] font-bold transition ${filter === f.id ? 'bg-white text-[#0C0C0F] shadow-sm' : 'text-[#94A3B8] hover:text-[#0C0C0F]'}`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value as typeof sortBy)}
+            className="h-9 px-3 pr-8 border border-[#E5E7EB] rounded-lg bg-white text-[0.74rem] font-bold text-[#0C0C0F] focus:outline-none focus:ring-2 focus:ring-[#0C0C0F]/10"
+          >
+            <option value="recent">Sort: Recent</option>
+            <option value="progress">Sort: Progress</option>
+            <option value="score">Sort: Quiz score</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {sorted.length === 0 ? (
+          <div className="bg-white border border-[#E5E7EB] rounded-2xl px-6 py-10 text-center">
+            <p className="text-[0.82rem] text-[#94A3B8]">No courses match this filter.</p>
+          </div>
+        ) : sorted.map(course => {
+          const progressColor = course.progress_pct >= 75 ? '#10B981' : course.progress_pct >= 25 ? '#FF5533' : '#3B82F6'
+          const isDone = course.enrollment_status === 'completed'
+          return (
+            <div key={course.course_id} className="bg-white border border-[#E5E7EB] rounded-2xl shadow-[0_4px_20px_rgba(12,12,15,0.04)] overflow-hidden px-5 py-5">
+              <div className="flex items-start gap-4 mb-4">
+                <div className="w-14 h-14 shrink-0 rounded-xl bg-[#F1F3F5] overflow-hidden border border-[#E5E7EB]">
+                  {course.thumbnail ? (
+                    <img src={`http://localhost:8000/uploads/${course.thumbnail}`} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-[#94A3B8]"><BookIcon /></div>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <p className="text-[0.95rem] font-black text-[#0C0C0F] truncate">{course.course_title}</p>
+                    {isDone ? (
+                      <span className="shrink-0 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[0.6rem] font-bold uppercase tracking-wide border border-emerald-200">Completed</span>
+                    ) : course.progress_pct === 0 ? (
+                      <span className="shrink-0 px-2 py-0.5 rounded-full bg-[#F1F3F5] text-[#94A3B8] text-[0.6rem] font-bold uppercase tracking-wide">Not started</span>
+                    ) : (
+                      <span className="shrink-0 px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 text-[0.6rem] font-bold uppercase tracking-wide border border-orange-200">In progress</span>
+                    )}
+                    {course.category_name && (
+                      <span className="shrink-0 px-2 py-0.5 rounded-full bg-[#F8F9FA] text-[#0C0C0F] text-[0.6rem] font-bold uppercase tracking-wide border border-[#E5E7EB]">{course.category_name}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-[0.72rem] text-[#94A3B8] flex-wrap">
+                    <span>{course.professor_name}</span>
+                    <span>·</span>
+                    <span>Enrolled {relTime(course.enrolled_at)}</span>
+                    {course.quiz.last_attempt_at && (
+                      <>
+                        <span>·</span>
+                        <span>Last quiz {relTime(course.quiz.last_attempt_at)}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Stats grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+                <div className="bg-[#F8F9FA] rounded-xl px-3 py-2.5">
+                  <p className="text-[0.6rem] font-bold text-[#94A3B8] uppercase tracking-wide mb-1">Lessons</p>
+                  <p className="text-[1.05rem] font-black text-[#0C0C0F] leading-none">{course.completed_items}/{course.total_items}</p>
+                </div>
+                <div className="bg-[#F8F9FA] rounded-xl px-3 py-2.5">
+                  <p className="text-[0.6rem] font-bold text-[#94A3B8] uppercase tracking-wide mb-1">Quizzes</p>
+                  <p className="text-[1.05rem] font-black text-[#3B82F6] leading-none">{course.quiz.attempts}</p>
+                </div>
+                <div className="bg-[#F8F9FA] rounded-xl px-3 py-2.5">
+                  <p className="text-[0.6rem] font-bold text-[#94A3B8] uppercase tracking-wide mb-1">Avg score</p>
+                  <p className="text-[1.05rem] font-black leading-none" style={{ color: course.quiz.attempts > 0 ? scoreColor(course.quiz.avg_score_pct) : '#94A3B8' }}>
+                    {course.quiz.attempts > 0 ? `${course.quiz.avg_score_pct}%` : '—'}
+                  </p>
+                </div>
+                <div className="bg-[#F8F9FA] rounded-xl px-3 py-2.5">
+                  <p className="text-[0.6rem] font-bold text-[#94A3B8] uppercase tracking-wide mb-1">Best</p>
+                  <p className="text-[1.05rem] font-black leading-none" style={{ color: course.quiz.attempts > 0 ? scoreColor(course.quiz.best_score_pct) : '#94A3B8' }}>
+                    {course.quiz.attempts > 0 ? `${course.quiz.best_score_pct}%` : '—'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Progress bar */}
+              <div>
+                <div className="flex items-center justify-between text-[0.68rem] mb-1.5">
+                  <span className="text-[#94A3B8] font-semibold">Course progress</span>
+                  <span className="font-bold text-[#0C0C0F]">{course.progress_pct}%</span>
+                </div>
+                <div className="h-2 bg-[#F1F3F5] rounded-full overflow-hidden">
+                  <div className="h-full rounded-full transition-all duration-700" style={{ width: `${course.progress_pct}%`, background: progressColor }} />
+                </div>
+              </div>
+
+              {/* Per-difficulty mini bars (only show if there's quiz data) */}
+              {course.quiz.attempts > 0 && (
+                <div className="mt-4 pt-4 border-t border-[#F1F3F5] grid grid-cols-3 gap-3">
+                  {(['easy', 'medium', 'hard'] as const).map(diff => {
+                    const stat = course.quiz.by_difficulty[diff] ?? { attempts: 0, avg_score_pct: 0, pass_rate: 0 }
+                    const meta = DIFFICULTY_META[diff]
+                    return (
+                      <div key={diff}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[0.6rem] font-bold uppercase tracking-wider" style={{ color: meta.color }}>{meta.label}</span>
+                          <span className="text-[0.7rem] font-black tabular-nums text-[#0C0C0F]">
+                            {stat.attempts > 0 ? `${stat.avg_score_pct}%` : '—'}
+                          </span>
+                        </div>
+                        <div className="h-1 bg-[#F1F3F5] rounded-full overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${stat.attempts > 0 ? stat.avg_score_pct : 0}%`, background: meta.color }} />
+                        </div>
+                        <p className="text-[0.6rem] font-semibold text-[#94A3B8] mt-0.5">{stat.attempts} attempt{stat.attempts === 1 ? '' : 's'}</p>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export default function StudentDashboard() {
   const { user, token } = useAuth()
   const [nav, setNav] = useState('home')
@@ -1359,7 +1905,7 @@ export default function StudentDashboard() {
     ? [...BASE_NAV.slice(0, -1), ANNOUNCEMENTS_NAV_ITEM, BASE_NAV[BASE_NAV.length - 1]]
     : BASE_NAV
 
-  const knownNavIds = new Set(['home', 'courses', 'my-courses', 'chat', 'messages', 'find-friends', 'announcements'])
+  const knownNavIds = new Set(['home', 'courses', 'my-courses', 'chat', 'messages', 'find-friends', 'announcements', 'grades'])
 
   return (
     <DashboardLayout navItems={navItems} activeNav={nav} onNavChange={setNav} roleLabel="Student">
@@ -1399,6 +1945,11 @@ export default function StudentDashboard() {
         {mounted.has('announcements') && <AnnouncementsSection token={token!} universityName={user?.university_name ?? ''} />}
       </div>
 
+      {/* ── Grades / Analytics ── */}
+      <div className={nav !== 'grades' ? 'hidden' : 'max-w-[1200px] mx-auto px-6 md:px-10 py-8'}>
+        {mounted.has('grades') && <StudentAnalyticsSection token={token!} onJumpToCourses={() => setNav('courses')} />}
+      </div>
+
       {/* ── Coming-soon sections ── */}
       {!knownNavIds.has(nav) && (
         <div className="flex-1 flex items-center justify-center min-h-[60vh]">
@@ -1410,130 +1961,139 @@ export default function StudentDashboard() {
       )}
 
       {/* ── Home ── */}
-      <div className={nav !== 'home' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
+      <div className={nav !== 'home' ? 'hidden' : 'max-w-[1080px] mx-auto px-6 md:px-10 py-10'}>
 
-        {/* Hero */}
-        <div className="mb-10 relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#0F172A] via-[#111827] to-[#0B1021] text-white shadow-[0_25px_80px_rgba(15,23,42,0.35)] border border-white/10">
-          <div className="absolute -right-10 -top-10 w-48 h-48 bg-[#FF5533]/20 blur-3xl rounded-full" />
-          <div className="absolute -left-10 -bottom-16 w-56 h-56 bg-[#22D3EE]/10 blur-3xl rounded-full" />
-          <div className="relative p-6 sm:p-8 flex flex-col gap-6">
-            <div className="flex flex-wrap items-start justify-between gap-6">
-              <div>
-                <p className="text-[0.7rem] font-bold tracking-[0.16em] uppercase text-white/70 mb-1">{getGreeting()}</p>
-                <h1 className="text-[1.9rem] font-black tracking-[-0.03em] leading-tight">Welcome back, {firstName || 'student'}</h1>
-                <p className="text-white/70 text-[0.95rem] max-w-xl mt-2">
-                  Keep your learning streak going with smoother navigation and a calmer workspace curated for you.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <button
-                  onClick={() => setNav('courses')}
-                  className="h-11 px-5 rounded-xl bg-white text-[#0C0C0F] font-semibold text-[0.9rem] border-none cursor-pointer shadow-md hover:-translate-y-0.5 transition-all"
-                >
-                  Explore courses
-                </button>
-                <button
-                  onClick={() => setNav('my-courses')}
-                  className="h-11 px-5 rounded-xl border border-white/40 text-white/90 font-semibold text-[0.9rem] bg-white/10 backdrop-blur cursor-pointer hover:border-white/70 transition-all"
-                >
-                  My learning
-                </button>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {[
-                { value: String(enrolledCourses.length), label: 'Enrolled courses' },
-                { value: String(enrolledCourses.filter(c => c.enrollment_status === 'completed').length), label: 'Completed' },
-                { value: String(enrolledCourses.filter(c => (c.progress_pct ?? 0) > 0 && c.enrollment_status !== 'completed').length), label: 'In progress' },
-              ].map((s, i) => (
-                <div
-                  key={s.label}
-                  className="rounded-xl bg-white/10 border border-white/15 backdrop-blur px-4 py-3 shadow-inner flex items-center justify-between"
-                >
-                  <div>
-                    <p className="text-[0.72rem] font-bold uppercase tracking-[0.12em] text-white/70">{s.label}</p>
-                    <p className="text-[1.35rem] font-black tracking-tight">{s.value}</p>
-                  </div>
-                  <span className="w-2 h-2 rounded-full bg-white/70" />
-                </div>
-              ))}
-            </div>
+        {/* Header */}
+        <div className="mb-10 flex flex-wrap items-end justify-between gap-6">
+          <div>
+            <p className="text-[0.66rem] font-bold tracking-[0.18em] uppercase text-[#FF5533] mb-2.5">{getGreeting()}</p>
+            <h1 className="text-[1.85rem] sm:text-[2.1rem] font-semibold tracking-[-0.025em] leading-[1.1] text-[#0C0C0F]">
+              Welcome back, {firstName || 'student'}.
+            </h1>
+            <p className="text-[#64748B] text-[0.92rem] mt-2.5 max-w-xl leading-relaxed">
+              Continue learning, browse new courses, or revisit lessons you started.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2.5">
+            <button
+              onClick={() => setNav('courses')}
+              className="h-10 px-5 rounded-lg bg-[#0C0C0F] text-white font-semibold text-[0.84rem] border-none cursor-pointer hover:bg-[#1E1E23] transition-colors"
+            >
+              Explore courses
+            </button>
+            <button
+              onClick={() => setNav('my-courses')}
+              className="h-10 px-5 rounded-lg border border-[#E5E7EB] bg-white text-[#0C0C0F] font-semibold text-[0.84rem] cursor-pointer hover:border-[#0C0C0F] transition-colors"
+            >
+              My learning
+            </button>
           </div>
         </div>
 
+        {/* Stats strip */}
+        <div className="mb-10 grid grid-cols-1 sm:grid-cols-3 gap-px bg-[#E5E7EB] rounded-xl overflow-hidden border border-[#E5E7EB]">
+          {[
+            { value: enrolledCourses.length, label: 'Enrolled' },
+            { value: enrolledCourses.filter(c => c.enrollment_status === 'completed').length, label: 'Completed' },
+            { value: enrolledCourses.filter(c => (c.progress_pct ?? 0) > 0 && c.enrollment_status !== 'completed').length, label: 'In progress' },
+          ].map(s => (
+            <div key={s.label} className="bg-white px-5 py-5">
+              <p className="text-[1.65rem] font-semibold tracking-tight text-[#0C0C0F] leading-none tabular-nums">{s.value}</p>
+              <p className="text-[0.66rem] font-bold tracking-[0.12em] uppercase text-[#94A3B8] mt-2.5">{s.label}</p>
+            </div>
+          ))}
+        </div>
+
         {/* University affiliation */}
-        <div className="mb-8">
+        <div className="mb-10">
           <UniversityCard token={token!} />
         </div>
 
         {/* Continue learning */}
         {resumeCourse && (
           <div className="mb-10">
-            <h2 className="text-[0.68rem] font-bold tracking-[0.12em] uppercase text-[#94A3B8] mb-4">Pick up where you left off</h2>
-            <div className="bg-white border border-[#E5E7EB] rounded-xl p-5 shadow-[0_18px_50px_rgba(12,12,15,0.05)] transition-transform hover:-translate-y-[2px]">
-              <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div>
+            <h2 className="text-[0.66rem] font-bold tracking-[0.14em] uppercase text-[#94A3B8] mb-4">Pick up where you left off</h2>
+            <div className="bg-white border border-[#E5E7EB] rounded-xl p-6">
+              <div className="flex items-start justify-between gap-6 flex-wrap">
+                <div className="min-w-0 flex-1">
                   {resumeCourse.category_name && (
-                    <span className="inline-block text-[0.58rem] font-bold tracking-[0.1em] uppercase px-2 py-0.5 rounded-sm mb-2 bg-[#FF5533]/10 text-[#FF5533]">
+                    <span className="inline-block text-[0.6rem] font-bold tracking-[0.1em] uppercase px-2 py-0.5 rounded mb-2 bg-[#F1F3F5] text-[#64748B]">
                       {resumeCourse.category_name}
                     </span>
                   )}
-                  <h3 className="text-[1.05rem] font-bold text-[#0C0C0F] mb-1">{resumeCourse.title}</h3>
+                  <h3 className="text-[1.05rem] font-semibold text-[#0C0C0F] mb-1 leading-snug">{resumeCourse.title}</h3>
                   <p className="text-[0.8rem] text-[#94A3B8]">{resumeCourse.professor_name}</p>
                 </div>
-                <span className="text-[1.5rem] font-black text-[#0C0C0F] font-mono tracking-tighter">{resumeCourse.progress_pct ?? 0}%</span>
+                <button
+                  onClick={() => setNav('my-courses')}
+                  className="px-4 h-9 bg-[#0C0C0F] text-white text-[0.8rem] font-semibold rounded-lg border-none cursor-pointer hover:bg-[#1E1E23] transition-colors shrink-0"
+                >
+                  Resume
+                </button>
               </div>
-              <div className="mt-4 h-[3px] bg-[#F1F3F5] rounded-full overflow-hidden">
-                <div className="h-full rounded-full bg-[#FF5533]" style={{ width: `${resumeCourse.progress_pct ?? 0}%` }} />
+              <div className="mt-5 flex items-center gap-3">
+                <div className="flex-1 h-1 bg-[#F1F3F5] rounded-full overflow-hidden">
+                  <div className="h-full rounded-full bg-[#FF5533]" style={{ width: `${resumeCourse.progress_pct ?? 0}%` }} />
+                </div>
+                <span className="text-[0.76rem] font-semibold text-[#0C0C0F] tabular-nums w-10 text-right">{resumeCourse.progress_pct ?? 0}%</span>
               </div>
-              <button onClick={() => setNav('my-courses')} className="mt-4 px-4 py-2 bg-[#0C0C0F] text-white text-[0.78rem] font-bold rounded-md border-none cursor-pointer hover:bg-[#1E1E23] transition-colors">
-                Resume
-              </button>
             </div>
           </div>
         )}
 
         {/* My courses progress list */}
         <div>
-          <h2 className="text-[0.68rem] font-bold tracking-[0.12em] uppercase text-[#94A3B8] mb-4">My courses</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-[0.66rem] font-bold tracking-[0.14em] uppercase text-[#94A3B8]">My courses</h2>
+            {enrolledCourses.length > 0 && (
+              <button
+                onClick={() => setNav('my-courses')}
+                className="text-[0.76rem] font-semibold text-[#64748B] hover:text-[#0C0C0F] bg-transparent border-none cursor-pointer transition-colors"
+              >
+                See all →
+              </button>
+            )}
+          </div>
           {enrolledCourses.length === 0 ? (
-            <div className="bg-white border border-[#E5E7EB] rounded-xl px-5 py-10 text-center shadow-[0_16px_44px_rgba(12,12,15,0.06)]">
-              <p className="text-[0.88rem] text-[#94A3B8]">No courses yet.</p>
-              <button onClick={() => setNav('courses')} className="mt-3 px-4 py-2 bg-[#0C0C0F] text-white text-[0.78rem] font-bold rounded-md border-none cursor-pointer hover:bg-[#1E1E23] transition-colors">
+            <div className="bg-white border border-[#E5E7EB] rounded-xl px-6 py-12 text-center">
+              <p className="text-[0.88rem] text-[#0C0C0F] font-medium">No courses yet</p>
+              <p className="text-[0.78rem] text-[#94A3B8] mt-1">Browse the catalog to get started.</p>
+              <button onClick={() => setNav('courses')} className="mt-5 px-4 h-9 bg-[#0C0C0F] text-white text-[0.8rem] font-semibold rounded-lg border-none cursor-pointer hover:bg-[#1E1E23] transition-colors">
                 Browse courses
               </button>
             </div>
           ) : (
-            <div className="bg-white border border-[#E5E7EB] rounded-xl shadow-[0_16px_44px_rgba(12,12,15,0.06)] divide-y divide-[#F1F3F5]">
-              {enrolledCourses.map((c, idx) => {
-                const color = ACCENT_COLORS[idx % ACCENT_COLORS.length]
+            <div className="bg-white border border-[#E5E7EB] rounded-xl divide-y divide-[#F1F3F5] overflow-hidden">
+              {enrolledCourses.map(c => {
                 const pct = c.progress_pct ?? 0
                 const isDone = c.enrollment_status === 'completed'
                 return (
                   <div
                     key={c.id}
                     onClick={() => setNav('my-courses')}
-                    className="group flex items-center gap-4 px-5 py-4 cursor-pointer transition-all hover:bg-[#FAFAFA]"
+                    className="group flex items-center gap-4 px-5 py-4 cursor-pointer transition-colors hover:bg-[#FAFAFA]"
                   >
-                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
+                    <div className="w-9 h-9 rounded-lg bg-[#0C0C0F] text-white flex items-center justify-center text-[0.82rem] font-semibold shrink-0">
+                      {c.title.charAt(0).toUpperCase()}
+                    </div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-[0.9rem] font-semibold text-[#0C0C0F] truncate group-hover:text-[#FF5533] transition-colors">{c.title}</div>
-                      <div className="text-[0.73rem] text-[#94A3B8]">{c.professor_name}</div>
+                      <div className="text-[0.88rem] font-semibold text-[#0C0C0F] truncate group-hover:text-[#FF5533] transition-colors">{c.title}</div>
+                      <div className="text-[0.74rem] text-[#94A3B8] truncate">{c.professor_name}</div>
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
                       {isDone ? (
-                        <span className="flex items-center gap-1 text-[0.72rem] font-bold text-emerald-600">
+                        <span className="flex items-center gap-1 text-[0.72rem] font-semibold text-emerald-600">
                           <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                           </svg>
-                          Done
+                          Completed
                         </span>
                       ) : (
                         <>
-                          <div className="w-16 h-[3px] bg-[#F1F3F5] rounded-full overflow-hidden hidden sm:block">
-                            <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+                          <div className="w-20 h-1 bg-[#F1F3F5] rounded-full overflow-hidden hidden sm:block">
+                            <div className="h-full rounded-full bg-[#FF5533]" style={{ width: `${pct}%` }} />
                           </div>
-                          <span className="text-[0.8rem] font-bold text-[#0C0C0F] font-mono w-12 text-right">{pct}%</span>
+                          <span className="text-[0.78rem] font-semibold text-[#0C0C0F] tabular-nums w-10 text-right">{pct}%</span>
                         </>
                       )}
                     </div>

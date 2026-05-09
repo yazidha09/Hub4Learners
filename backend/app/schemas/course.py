@@ -76,6 +76,7 @@ class CourseOut(BaseModel):
     description: Optional[str]
     thumbnail: Optional[str]
     is_free: bool
+    price: float = 0.0
     professor_id: UUID
     professor_name: str
     category_id: Optional[UUID] = None

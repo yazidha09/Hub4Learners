@@ -55,7 +55,7 @@ def register_user(data: RegisterRequest, db: Session) -> TokenResponse:
         email=data.email,
         password_hash=hash_password(data.password),
         role=role,
-        is_verified=(role == "student"),  # professors must get verified first
+        is_verified=True,
     )
     db.add(user)
     db.commit()

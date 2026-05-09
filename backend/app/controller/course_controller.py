@@ -2,6 +2,7 @@ import os
 import shutil
 from collections import defaultdict
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID, uuid4
 
@@ -19,6 +20,7 @@ from app.models.enrollment import Enrollment
 from app.models.lesson_block import LessonBlock
 from app.models.user import User
 from app.models.course_feedback import CourseFeedback
+from app.models.qcm_attempt import QCMAttempt
 from app.schemas.course import (
     CourseOut, SectionOut, SectionCreate, MaterialOut, LessonBlockOut,
     SubsectionOut, SubsectionCreate,
@@ -72,6 +74,23 @@ def _build_block_out(b: LessonBlock) -> LessonBlockOut:
         order_index=b.order_index,
         created_at=b.created_at,
     )
+
+
+def get_course_id_for_block(block_id: str, db: Session) -> Optional[str]:
+    """Resolve the owning course_id for a lesson block, walking
+    block → subsection/section → course. Returns None if not found."""
+    block = db.query(LessonBlock).filter(LessonBlock.id == UUID(block_id)).first()
+    if not block:
+        return None
+    if block.subsection_id:
+        sub = db.query(CourseSubsection).filter(CourseSubsection.id == block.subsection_id).first()
+        section_id = sub.section_id if sub else None
+    else:
+        section_id = block.section_id
+    if not section_id:
+        return None
+    section = db.query(CourseSection).filter(CourseSection.id == section_id).first()
+    return str(section.course_id) if section else None
 
 
 def _build_section_out(section: CourseSection, db: Session) -> SectionOut:
@@ -155,6 +174,7 @@ def _build_course_out(course: Course, db: Session) -> CourseOut:
         description=course.description,
         thumbnail=course.thumbnail,
         is_free=course.is_free,
+        price=float(course.price or 0),
         professor_id=course.professor_id,
         professor_name=professor.full_name if professor else "Unknown",
         category_id=course.category_id,
@@ -342,6 +362,7 @@ def _build_course_list(courses: list, db: Session) -> list:
             description=c.description,
             thumbnail=c.thumbnail,
             is_free=c.is_free,
+            price=float(c.price or 0),
             professor_id=c.professor_id,
             professor_name=professors[c.professor_id].full_name if c.professor_id in professors else "Unknown",
             category_id=c.category_id,
@@ -357,15 +378,29 @@ def _build_course_list(courses: list, db: Session) -> list:
     ]
 
 
+MIN_PAID_PRICE = Decimal("10.00")
+
+
 def create_course(
     professor_id: str,
     title: str,
     description: Optional[str],
     is_free: bool,
+    price: float,
     category_id: Optional[str],
     thumbnail_file: Optional[UploadFile],
     db: Session,
 ) -> CourseOut:
+    if is_free:
+        course_price = Decimal("0.00")
+    else:
+        course_price = Decimal(str(price)).quantize(Decimal("0.01"))
+        if course_price < MIN_PAID_PRICE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Paid courses must cost at least ${MIN_PAID_PRICE}.",
+            )
+
     thumbnail_path: Optional[str] = None
     if thumbnail_file and thumbnail_file.filename:
         filename = _save_file(thumbnail_file, THUMBNAILS_DIR, THUMBNAIL_EXTS, professor_id)
@@ -380,6 +415,7 @@ def create_course(
         title=title,
         description=description,
         is_free=is_free,
+        price=course_price,
         is_subscription=False,
         professor_id=UUID(professor_id),
         category_id=UUID(category_id) if category_id else None,
@@ -1006,8 +1042,10 @@ def delete_course(professor_id: str, course_id: str, db: Session) -> dict:
 
     cid = str(course.id)
 
-    # Must delete progress first — it has FKs to subsections and materials
+    # Order matters: every table whose FK to courses is NO ACTION must be
+    # cleared first or Postgres rejects the final db.delete(course).
     db.query(CourseProgress).filter(CourseProgress.course_id == UUID(cid)).delete()
+    db.query(QCMAttempt).filter(QCMAttempt.course_id == UUID(cid)).delete()
 
     sections = db.query(CourseSection).filter(CourseSection.course_id == UUID(cid)).all()
     for section in sections:
@@ -1023,6 +1061,14 @@ def delete_course(professor_id: str, course_id: str, db: Session) -> dict:
     db.query(Enrollment).filter(Enrollment.course_id == UUID(cid)).delete()
     db.delete(course)
     db.commit()
+
+    # Best-effort: clear the course's vector namespace so we don't leak.
+    try:
+        from app.utils.rag import delete_course_namespace
+        delete_course_namespace(cid)
+    except Exception as exc:
+        print(f"[RAG] Failed to clear Pinecone namespace for {cid}: {exc}")
+
     return {"detail": "Course deleted successfully"}
 
 
@@ -1033,14 +1079,6 @@ def toggle_publish(professor_id: str, course_id: str, db: Session) -> CourseOut:
     if str(course.professor_id) != professor_id:
         raise HTTPException(status_code=403, detail="Not your course")
 
-    if not course.is_published:
-        prof = db.query(User).filter(User.id == UUID(professor_id)).first()
-        if prof and not prof.is_verified:
-            raise HTTPException(
-                status_code=403,
-                detail="Your account must be verified before you can publish courses. Submit a verification request to your region admin.",
-            )
-
     course.is_published = not course.is_published
     db.commit()
     db.refresh(course)
@@ -1048,9 +1086,7 @@ def toggle_publish(professor_id: str, course_id: str, db: Session) -> CourseOut:
 
 
 def list_published_courses(db: Session, category_id: Optional[str] = None) -> List[CourseOut]:
-    query = db.query(Course).filter(
-        Course.is_published == True, Course.is_free == True  # noqa: E712
-    )
+    query = db.query(Course).filter(Course.is_published == True)  # noqa: E712
     if category_id:
         query = query.filter(Course.category_id == UUID(category_id))
     courses = query.order_by(Course.created_at.desc()).all()
@@ -1064,14 +1100,20 @@ def get_course_detail(course_id: str, db: Session) -> CourseOut:
     return _build_course_out(course, db)
 
 
-def enroll_student(student_id: str, course_id: str, db: Session) -> EnrollmentOut:
+def enroll_student(
+    student_id: str,
+    course_id: str,
+    db: Session,
+    *,
+    allow_paid: bool = False,
+) -> EnrollmentOut:
     course = db.query(Course).filter(Course.id == UUID(course_id)).first()
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
     if not course.is_published:
         raise HTTPException(status_code=400, detail="Course is not published")
-    if not course.is_free:
-        raise HTTPException(status_code=400, detail="Paid courses are not available yet")
+    if not course.is_free and not allow_paid:
+        raise HTTPException(status_code=402, detail="This course requires payment to enroll.")
     if str(course.professor_id) == student_id:
         raise HTTPException(status_code=400, detail="You cannot enroll in your own course")
 

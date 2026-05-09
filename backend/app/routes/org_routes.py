@@ -48,7 +48,7 @@ def delete_region(
     return org_controller.delete_region(current_user, region_id, db)
 
 
-# ── Universities (super_admin + regional_admin) ────────────────────────────────
+# ── Universities (super_admin) ─────────────────────────────────────────────────
 
 @router.get("/universities", response_model=List[UniversityOut])
 def list_universities(
@@ -63,7 +63,7 @@ def list_universities(
 def create_university(
     data: UniversityCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_min_rank("regional_admin")),
+    current_user: dict = Depends(require_role("super_admin")),
 ):
     return org_controller.create_university(current_user, data, db)
 
@@ -72,27 +72,18 @@ def create_university(
 def delete_university(
     university_id: str,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_min_rank("regional_admin")),
+    current_user: dict = Depends(require_role("super_admin")),
 ):
     return org_controller.delete_university(current_user, university_id, db)
 
 
-# ── Admin creation (hierarchy-scoped) ─────────────────────────────────────────
-
-@router.post("/admins/regional")
-def create_regional_admin(
-    data: CreateAdminRequest,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(require_role("super_admin")),
-):
-    return org_controller.create_regional_admin(current_user, data, db)
-
+# ── Admin creation (super_admin) ──────────────────────────────────────────────
 
 @router.post("/admins/university")
 def create_university_admin(
     data: CreateAdminRequest,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_min_rank("regional_admin")),
+    current_user: dict = Depends(require_role("super_admin")),
 ):
     return org_controller.create_university_admin(current_user, data, db)
 

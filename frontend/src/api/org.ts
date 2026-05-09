@@ -73,10 +73,6 @@ export function deleteUniversity(token: string, universityId: string): Promise<{
 
 // ── Admin creation ────────────────────────────────────────────────────────────
 
-export function createRegionalAdmin(token: string, data: CreateAdminRequest): Promise<{ id: string; full_name: string; email: string; role: string }> {
-  return request('/org/admins/regional', token, { method: 'POST', body: JSON.stringify(data) })
-}
-
 export function createUniversityAdmin(token: string, data: CreateAdminRequest): Promise<{ id: string; full_name: string; email: string; role: string }> {
   return request('/org/admins/university', token, { method: 'POST', body: JSON.stringify(data) })
 }
