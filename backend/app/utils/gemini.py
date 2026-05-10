@@ -12,20 +12,6 @@ MODEL       = "gemini-3.1-flash-lite-preview"
 MAX_HISTORY = 20
 
 
-def chat(
-    course_title: str,
-    history: list[dict],
-    user_message: str,
-) -> str:
-    """Legacy no-context chat — kept for backward compatibility."""
-    return chat_with_context(
-        course_title=course_title,
-        context_chunks=[],
-        history=history,
-        user_message=user_message,
-    )
-
-
 def chat_with_context(
     course_title: str,
     context_chunks: List[str],
@@ -166,6 +152,72 @@ def generate_course_summary(
     response = model.generate_content(user_text)
     text = (response.text or "").strip()
     # Strip a wrapping ```markdown ... ``` fence if the model added one.
+    text = re.sub(r"^```(?:markdown)?\s*\n", "", text)
+    text = re.sub(r"\n```\s*$", "", text)
+    return text.strip()
+
+
+DISCUSSION_SUMMARY_MAX_INPUT_CHARS = 60_000
+
+
+def summarize_discussion_thread(
+    lesson_title: str,
+    course_title: str,
+    posts: list[dict],
+) -> str:
+    """Produce a short markdown summary of a lesson's discussion thread.
+
+    `posts` shape: [{"author": str, "content": str, "upvotes": int,
+                      "replies": [{"author": str, "content": str, "upvotes": int}]}]
+
+    Output is markdown. Returns "" if there is nothing meaningful to summarize.
+    """
+    if not GEMINI_KEY:
+        raise RuntimeError("gemini_api_key is not set")
+
+    if not posts:
+        return ""
+
+    genai.configure(api_key=GEMINI_KEY)
+
+    parts: list[str] = []
+    parts.append(f"# Lesson: {lesson_title} (Course: {course_title})\n")
+    for i, p in enumerate(posts, 1):
+        parts.append(
+            f"\n## Post {i} — {p.get('author', 'student')} "
+            f"(↑{p.get('upvotes', 0)})\n{p.get('content', '').strip()}"
+        )
+        for r in p.get("replies", []) or []:
+            parts.append(
+                f"\n  ↳ Reply by {r.get('author', 'student')} "
+                f"(↑{r.get('upvotes', 0)}): {r.get('content', '').strip()}"
+            )
+    full_input = "\n".join(parts)
+    if len(full_input) > DISCUSSION_SUMMARY_MAX_INPUT_CHARS:
+        full_input = full_input[:DISCUSSION_SUMMARY_MAX_INPUT_CHARS] + "\n\n[... truncated ...]"
+
+    system_text = (
+        "You analyze a lesson's student discussion thread and produce a short, "
+        "scannable digest for someone deciding whether to read the full thread.\n\n"
+        "Output requirements (pure markdown, no preamble or closing remarks):\n"
+        "- Start with a one-sentence **TL;DR** in bold prefixed with `**TL;DR:**`.\n"
+        "- Then `### Common questions` — 2-4 bullets, each a real recurring question.\n"
+        "- Then `### Top answers & insights` — 2-4 bullets summarising the most upvoted "
+        "or clarifying replies. Quote concrete techniques, terms, or examples.\n"
+        "- Then `### Where students struggle` — 1-3 bullets on points of confusion.\n\n"
+        "Style:\n"
+        "- Be concise. Each bullet under 25 words.\n"
+        "- Stay strictly grounded in the discussion content — do not invent topics.\n"
+        "- Use inline `code` for technical identifiers.\n"
+        "- If the thread is too short or off-topic to summarise meaningfully, "
+        "reply with exactly: `Not enough discussion yet to summarise.`"
+    )
+
+    user_text = f"Below is the full discussion thread for this lesson.\n\n{full_input}"
+
+    model = genai.GenerativeModel(SUMMARY_MODEL, system_instruction=system_text)
+    response = model.generate_content(user_text)
+    text = (response.text or "").strip()
     text = re.sub(r"^```(?:markdown)?\s*\n", "", text)
     text = re.sub(r"\n```\s*$", "", text)
     return text.strip()

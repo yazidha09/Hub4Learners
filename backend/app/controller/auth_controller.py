@@ -69,6 +69,23 @@ def login_user(data: LoginRequest, db: Session) -> TokenResponse:
     if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
+    # Daily-login XP — XP service is one-shot per source_id, so it's safe to
+    # call on every login. Idempotent for the same UTC day.
+    try:
+        from datetime import date as _date
+        from app.controller.gamification import xp_service
+        xp_service.award_xp(
+            user_id=str(user.id),
+            source_type="daily_login",
+            source_id=f"login-{user.id}-{_date.today().isoformat()}",
+            description="Daily login bonus",
+            update_streak=False,
+            db=db,
+        )
+    except Exception:
+        # Gamification must never block authentication
+        pass
+
     return TokenResponse(access_token=_build_token(user))
 
 

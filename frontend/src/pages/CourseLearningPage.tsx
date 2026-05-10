@@ -3,6 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useAuth } from '../context/AuthContext'
+import { useGamification } from '../context/GamificationContext'
 import {
   getCourseDetail, getCourseProgress, markItemCompleted,
   getCourseFeedback, submitFeedback,
@@ -16,6 +17,8 @@ import {
   type QCMAttemptOut,
 } from '../api/qcm'
 import QCMModal from '../components/QCMModal'
+import DiscussionSection from '../components/DiscussionSection'
+import { listDiscussionPosts } from '../api/discussions'
 
 interface ChatMessage {
   id: string
@@ -265,6 +268,7 @@ function SubsectionContentRenderer({ subsection }: { subsection: SubsectionOut }
 export default function CourseLearningPage() {
   const { courseId } = useParams<{ courseId: string }>()
   const { token, user } = useAuth()
+  const { refresh: refreshGamification } = useGamification()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const isPreview = searchParams.get('preview') === '1'
@@ -302,6 +306,22 @@ export default function CourseLearningPage() {
 
   const [qcmAttempts, setQcmAttempts] = useState<QCMAttemptOut[]>([])
   const [qcmModal, setQcmModal] = useState<{ sectionId?: string; scopeLabel: string } | null>(null)
+
+  // Lesson discussion (drawer modal)
+  const [showDiscussion, setShowDiscussion] = useState(false)
+  const [discussionCount, setDiscussionCount] = useState(0)
+
+  // Reset discussion drawer state when navigating between lessons + prefetch post count for the badge.
+  useEffect(() => {
+    setShowDiscussion(false)
+    setDiscussionCount(0)
+    if (!activeSubsection || !token || isPreview) return
+    let cancelled = false
+    listDiscussionPosts(token, activeSubsection.id, 'new', 1, 0)
+      .then((data) => { if (!cancelled) setDiscussionCount(data.total) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [activeSubsection?.id, token, isPreview])
 
   // AI course summary (markdown recap rendered at the bottom of the course)
   const [summaryMd, setSummaryMd] = useState<string | null>(null)
@@ -396,6 +416,9 @@ export default function CourseLearningPage() {
         updated = await markItemCompleted(token, courseId, undefined, activeMaterial.id)
       }
       if (updated) setProgress(updated)
+      // Refresh gamification — the diff vs previous profile pops level-ups,
+      // achievements and badge unlocks via toasts.
+      void refreshGamification()
     } catch {
       // silently ignore (e.g. not enrolled in preview)
     } finally {
@@ -757,32 +780,52 @@ export default function CourseLearningPage() {
                   <h3 className="text-[1rem] font-bold text-[#E2E8F0] leading-snug">
                     {activeSubsection?.title ?? activeMaterial?.title}
                   </h3>
-                  {/* Mark complete inline — compact version in title bar */}
-                  {!isPreview && (
-                    isCurrentItemDone() ? (
-                      <span className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[0.75rem] font-semibold">
-                        <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                        </svg>
-                        Done
-                      </span>
-                    ) : (
+                  <div className="shrink-0 flex items-center gap-2">
+                    {/* Discussion trigger — only for subsections (lessons), not legacy materials */}
+                    {!isPreview && activeSubsection && token && user && (
                       <button
-                        onClick={handleMarkComplete}
-                        disabled={markingComplete}
-                        className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1A1D25] border border-[#252830] text-[#64748B] text-[0.75rem] font-semibold hover:border-emerald-500/30 hover:text-emerald-400 hover:bg-emerald-500/5 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200"
+                        onClick={() => setShowDiscussion(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1A1D25] border border-[#252830] text-[#CBD5E1] text-[0.75rem] font-semibold hover:border-[#FF5533]/40 hover:bg-[#FF5533]/5 hover:text-white transition-all duration-200"
                       >
-                        {markingComplete ? (
-                          <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                        ) : (
+                        <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+                        </svg>
+                        Discussion
+                        {discussionCount > 0 && (
+                          <span className="ml-0.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-[#FF5533] text-white text-[0.62rem] font-bold tabular-nums">
+                            {discussionCount > 999 ? '999+' : discussionCount}
+                          </span>
+                        )}
+                      </button>
+                    )}
+
+                    {/* Mark complete inline — compact version in title bar */}
+                    {!isPreview && (
+                      isCurrentItemDone() ? (
+                        <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[0.75rem] font-semibold">
                           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                           </svg>
-                        )}
-                        Mark done
-                      </button>
-                    )
-                  )}
+                          Done
+                        </span>
+                      ) : (
+                        <button
+                          onClick={handleMarkComplete}
+                          disabled={markingComplete}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1A1D25] border border-[#252830] text-[#64748B] text-[0.75rem] font-semibold hover:border-emerald-500/30 hover:text-emerald-400 hover:bg-emerald-500/5 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200"
+                        >
+                          {markingComplete ? (
+                            <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                          )}
+                          Mark done
+                        </button>
+                      )
+                    )}
+                  </div>
                 </div>
             </div>
           )}
@@ -1431,6 +1474,19 @@ export default function CourseLearningPage() {
             setQcmModal(null)
             refreshQcmHistory()
           }}
+        />
+      )}
+
+      {!isPreview && activeSubsection && token && user && (
+        <DiscussionSection
+          key={activeSubsection.id}
+          open={showDiscussion}
+          onClose={() => setShowDiscussion(false)}
+          subsectionId={activeSubsection.id}
+          lessonTitle={activeSubsection.title}
+          token={token}
+          currentUserId={user.id}
+          onCountChange={setDiscussionCount}
         />
       )}
     </div>

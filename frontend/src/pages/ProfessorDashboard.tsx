@@ -3,6 +3,7 @@ import Markdown from 'react-markdown'
 import RichTextEditor from '../components/RichTextEditor'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useGamification } from '../context/GamificationContext'
 import DashboardLayout, { type NavItem } from '../components/DashboardLayout'
 import {
   getMyCourses, getCourseDetail, createCourse, addSection, addSubsection, togglePublish, listPublishedCourses,
@@ -23,6 +24,8 @@ import {
   type UniversityOut, type JoinRequestOut,
 } from '../api/org'
 import { getMyAnnouncements, type AnnouncementOut } from '../api/admin'
+import GamificationPage from '../components/gamification/GamificationPage'
+import ProfileStats from '../components/gamification/ProfileStats'
 
 /* ── Icons ── */
 const HomeIcon = () => (
@@ -78,11 +81,19 @@ const MegaphoneIcon = () => (
   </svg>
 )
 
+const TrophyIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 1 1-10 0V4z" />
+    <path d="M17 4h3v3a3 3 0 0 1-3 3M7 4H4v3a3 3 0 0 0 3 3" />
+  </svg>
+)
+
 const BASE_NAV: NavItem[] = [
   { id: 'home', label: 'Home', icon: <HomeIcon /> },
   { id: 'courses', label: 'Courses', icon: <BookIcon /> },
   { id: 'my-courses', label: 'My Courses', icon: <FolderIcon /> },
   { id: 'my-learning', label: 'My Learning', icon: <GraduationCapIcon /> },
+  { id: 'gamification', label: 'Hero Stats', icon: <TrophyIcon /> },
   { id: 'students', label: 'Students', icon: <UsersIcon /> },
   { id: 'chat', label: 'Chat Requests', icon: <ChatIcon /> },
   { id: 'messages', label: 'Messages', icon: <MessagesIcon /> },
@@ -560,6 +571,7 @@ function CourseManager({ token, course, onBack, onRefresh }: {
   token: string; course: CourseOut; onBack: () => void; onRefresh: (updated: CourseOut) => void
 }) {
   const { user } = useAuth()
+  const { refresh: refreshGamification } = useGamification()
   const [sectionTitle, setSectionTitle] = useState('')
   const [addingSec, setAddingSec] = useState(false)
   const [editingFor, setEditingFor] = useState<string | null>(null)
@@ -728,6 +740,8 @@ function CourseManager({ token, course, onBack, onRefresh }: {
     try {
       const updated = await togglePublish(token, current.id)
       setCurrent(updated); onRefresh(updated)
+      // Surface XP / achievement / badge toasts for first-time publish.
+      void refreshGamification()
     } catch (e: any) {
       setPublishErr(e.message || 'Could not toggle publish')
     } finally { setPublishing(false) }
@@ -3755,7 +3769,7 @@ export default function ProfessorDashboard() {
     ? [...BASE_NAV.slice(0, -1), ANNOUNCEMENTS_NAV_ITEM, BASE_NAV[BASE_NAV.length - 1]]
     : BASE_NAV
 
-  const knownNavIds = new Set(['home', 'courses', 'my-learning', 'my-courses', 'students', 'chat', 'messages', 'find-friends', 'announcements', 'analytics'])
+  const knownNavIds = new Set(['home', 'courses', 'my-learning', 'my-courses', 'gamification', 'students', 'chat', 'messages', 'find-friends', 'announcements', 'analytics'])
 
   return (
     <DashboardLayout navItems={navItems} activeNav={nav} onNavChange={setNav} roleLabel="Professor">
@@ -3815,6 +3829,11 @@ export default function ProfessorDashboard() {
         {mounted.has('analytics') && <AnalyticsSection token={token!} />}
       </div>
 
+      {/* ── Gamification / Hero Stats ── */}
+      <div className={nav !== 'gamification' ? 'hidden' : ''}>
+        {mounted.has('gamification') && <GamificationPage />}
+      </div>
+
       {/* ── Coming-soon sections ── */}
       {!knownNavIds.has(nav) && (
         <div className="flex-1 flex items-center justify-center min-h-[60vh]">
@@ -3872,6 +3891,11 @@ export default function ProfessorDashboard() {
               Browse catalog
             </button>
           </div>
+        </div>
+
+        {/* Hero Stats — XP / Level / Streak */}
+        <div className="mb-10">
+          <ProfileStats />
         </div>
 
         {/* Stats strip */}

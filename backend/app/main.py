@@ -34,7 +34,14 @@ from app.models.announcement import Announcement            # noqa: F401
 from app.models.course_progress import CourseProgress      # noqa: F401
 from app.models.course_feedback import CourseFeedback      # noqa: F401
 from app.models.qcm_attempt import QCMAttempt              # noqa: F401
+from app.models.gamification import (                       # noqa: F401
+    UserGamification, XPLog, Achievement, UserAchievement, Badge, UserBadge,
+)
+from app.models.discussion import (                         # noqa: F401
+    DiscussionPost, DiscussionVote, DiscussionReport, DiscussionSummary,
+)
 from app.controller.category_controller import seed_categories
+from app.controller.gamification.seed import seed_gamification
 from app.routes.auth_routes import router as auth_router
 from app.routes.course_routes import router as course_router
 from app.routes.category_routes import router as category_router
@@ -48,6 +55,8 @@ from app.routes.ws_routes import router as ws_router
 from app.routes.course_generation_routes import router as course_gen_router
 from app.routes.announcement_routes import router as announcement_router
 from app.routes.payment_routes import router as payment_router
+from app.routes.gamification_routes import router as gamification_router
+from app.routes.discussion_routes import router as discussion_router
 
 app = FastAPI()
 
@@ -301,6 +310,132 @@ def on_startup():
             "CREATE INDEX IF NOT EXISTS ix_qcm_attempts_student ON qcm_attempts(student_id)",
             "CREATE INDEX IF NOT EXISTS ix_qcm_attempts_course ON qcm_attempts(course_id)",
             "CREATE INDEX IF NOT EXISTS ix_qcm_attempts_section ON qcm_attempts(section_id)",
+            # ── Gamification ──────────────────────────────────────────────────
+            """
+            CREATE TABLE IF NOT EXISTS achievements (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                code VARCHAR(64) NOT NULL UNIQUE,
+                title VARCHAR(120) NOT NULL,
+                description TEXT NOT NULL,
+                icon VARCHAR(40) NOT NULL DEFAULT 'trophy',
+                xp_reward INTEGER NOT NULL DEFAULT 0,
+                category VARCHAR(40) NOT NULL DEFAULT 'general',
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS badges (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                code VARCHAR(64) NOT NULL UNIQUE,
+                title VARCHAR(120) NOT NULL,
+                description TEXT NOT NULL,
+                icon VARCHAR(40) NOT NULL DEFAULT 'shield',
+                rarity VARCHAR(20) NOT NULL DEFAULT 'common',
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS user_gamification (
+                user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                total_xp INTEGER NOT NULL DEFAULT 0,
+                level INTEGER NOT NULL DEFAULT 1,
+                current_streak INTEGER NOT NULL DEFAULT 0,
+                longest_streak INTEGER NOT NULL DEFAULT 0,
+                last_activity_date DATE,
+                streak_freeze_used_on DATE,
+                equipped_badge_id UUID REFERENCES badges(id) ON DELETE SET NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS xp_logs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                amount INTEGER NOT NULL,
+                source_type VARCHAR(40) NOT NULL,
+                source_id VARCHAR(64),
+                description VARCHAR(255),
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_xp_logs_user ON xp_logs(user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_xp_logs_source_type ON xp_logs(source_type)",
+            "CREATE INDEX IF NOT EXISTS ix_xp_logs_source_id ON xp_logs(source_id)",
+            "CREATE INDEX IF NOT EXISTS ix_xp_logs_created ON xp_logs(created_at)",
+            """
+            CREATE TABLE IF NOT EXISTS user_achievements (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                achievement_id UUID NOT NULL REFERENCES achievements(id) ON DELETE CASCADE,
+                unlocked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                seen BOOLEAN NOT NULL DEFAULT FALSE,
+                CONSTRAINT uq_user_achievement UNIQUE (user_id, achievement_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_user_achievements_user ON user_achievements(user_id)",
+            """
+            CREATE TABLE IF NOT EXISTS user_badges (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                badge_id UUID NOT NULL REFERENCES badges(id) ON DELETE CASCADE,
+                unlocked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_user_badge UNIQUE (user_id, badge_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_user_badges_user ON user_badges(user_id)",
+            # ── Lesson discussions ────────────────────────────────────────────
+            """
+            CREATE TABLE IF NOT EXISTS discussion_posts (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+                subsection_id UUID NOT NULL REFERENCES course_subsections(id) ON DELETE CASCADE,
+                author_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                parent_post_id UUID REFERENCES discussion_posts(id) ON DELETE CASCADE,
+                content TEXT NOT NULL,
+                is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+                edited_at TIMESTAMP,
+                upvote_count INTEGER NOT NULL DEFAULT 0,
+                reply_count INTEGER NOT NULL DEFAULT 0,
+                report_count INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_discussion_posts_subsection ON discussion_posts(subsection_id)",
+            "CREATE INDEX IF NOT EXISTS ix_discussion_posts_parent ON discussion_posts(parent_post_id)",
+            "CREATE INDEX IF NOT EXISTS ix_discussion_posts_author ON discussion_posts(author_id)",
+            "CREATE INDEX IF NOT EXISTS ix_discussion_posts_course ON discussion_posts(course_id)",
+            "CREATE INDEX IF NOT EXISTS ix_discussion_posts_sub_top ON discussion_posts(subsection_id, parent_post_id)",
+            """
+            CREATE TABLE IF NOT EXISTS discussion_votes (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                post_id UUID NOT NULL REFERENCES discussion_posts(id) ON DELETE CASCADE,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_discussion_vote UNIQUE (post_id, user_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_discussion_votes_post ON discussion_votes(post_id)",
+            "CREATE INDEX IF NOT EXISTS ix_discussion_votes_user ON discussion_votes(user_id)",
+            """
+            CREATE TABLE IF NOT EXISTS discussion_reports (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                post_id UUID NOT NULL REFERENCES discussion_posts(id) ON DELETE CASCADE,
+                reporter_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                reason VARCHAR(255),
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_discussion_report UNIQUE (post_id, reporter_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_discussion_reports_post ON discussion_reports(post_id)",
+            """
+            CREATE TABLE IF NOT EXISTS discussion_summaries (
+                subsection_id UUID PRIMARY KEY REFERENCES course_subsections(id) ON DELETE CASCADE,
+                summary_md TEXT NOT NULL,
+                post_count_at_gen INTEGER NOT NULL DEFAULT 0,
+                generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
         ]
         for sql in migrations:
             conn.execute(sa.text(sql))
@@ -309,6 +444,7 @@ def on_startup():
     db = SessionLocal()
     try:
         seed_categories(db)
+        seed_gamification(db)
     finally:
         db.close()
 
@@ -326,6 +462,8 @@ app.include_router(notification_router,      prefix="/api")
 app.include_router(course_gen_router,        prefix="/api")
 app.include_router(announcement_router,      prefix="/api")
 app.include_router(payment_router,           prefix="/api")
+app.include_router(gamification_router,      prefix="/api")
+app.include_router(discussion_router,        prefix="/api")
 app.include_router(ws_router)  # No /api prefix — WebSocket paths start with /ws
 
 

@@ -17,6 +17,8 @@ import FindFriends from '../components/FindFriends'
 import { listUniversities, type UniversityOut } from '../api/org'
 import { getMyAnnouncements, type AnnouncementOut } from '../api/admin'
 import { updateProfile } from '../api/auth'
+import GamificationPage from '../components/gamification/GamificationPage'
+import ProfileStats from '../components/gamification/ProfileStats'
 
 /* ── Icons ── */
 const HomeIcon = () => (
@@ -61,11 +63,18 @@ const MegaphoneIcon = () => (
     <path d="M3 11l19-9-9 19-2-8-8-2z" />
   </svg>
 )
+const TrophyIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 1 1-10 0V4z" />
+    <path d="M17 4h3v3a3 3 0 0 1-3 3M7 4H4v3a3 3 0 0 0 3 3" />
+  </svg>
+)
 
 const BASE_NAV: NavItem[] = [
   { id: 'home', label: 'Home', icon: <HomeIcon /> },
   { id: 'courses', label: 'Courses', icon: <BookIcon /> },
   { id: 'my-courses', label: 'My Courses', icon: <GraduationCapIcon /> },
+  { id: 'gamification', label: 'Hero Stats', icon: <TrophyIcon /> },
   { id: 'chat', label: 'Chat Requests', icon: <ChatIcon /> },
   { id: 'messages', label: 'Messages', icon: <FriendsIcon /> },
   { id: 'find-friends', label: 'Find Friends', icon: <AddFriendIcon /> },
@@ -1905,7 +1914,7 @@ export default function StudentDashboard() {
     ? [...BASE_NAV.slice(0, -1), ANNOUNCEMENTS_NAV_ITEM, BASE_NAV[BASE_NAV.length - 1]]
     : BASE_NAV
 
-  const knownNavIds = new Set(['home', 'courses', 'my-courses', 'chat', 'messages', 'find-friends', 'announcements', 'grades'])
+  const knownNavIds = new Set(['home', 'courses', 'my-courses', 'gamification', 'chat', 'messages', 'find-friends', 'announcements', 'grades'])
 
   return (
     <DashboardLayout navItems={navItems} activeNav={nav} onNavChange={setNav} roleLabel="Student">
@@ -1950,6 +1959,11 @@ export default function StudentDashboard() {
         {mounted.has('grades') && <StudentAnalyticsSection token={token!} onJumpToCourses={() => setNav('courses')} />}
       </div>
 
+      {/* ── Gamification / Hero Stats ── */}
+      <div className={nav !== 'gamification' ? 'hidden' : ''}>
+        {mounted.has('gamification') && <GamificationPage />}
+      </div>
+
       {/* ── Coming-soon sections ── */}
       {!knownNavIds.has(nav) && (
         <div className="flex-1 flex items-center justify-center min-h-[60vh]">
@@ -1988,6 +2002,11 @@ export default function StudentDashboard() {
               My learning
             </button>
           </div>
+        </div>
+
+        {/* Hero Stats — XP / Level / Streak */}
+        <div className="mb-10">
+          <ProfileStats />
         </div>
 
         {/* Stats strip */}

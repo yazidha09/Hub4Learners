@@ -6,6 +6,7 @@ import {
   type QCMQuestion,
   type QCMSubmitOut,
 } from '../api/qcm'
+import { useGamification } from '../context/GamificationContext'
 
 type Stage = 'pick' | 'loading' | 'quiz' | 'results' | 'error'
 
@@ -24,6 +25,7 @@ const DIFFICULTIES: { id: QCMDifficulty; label: string; questions: number; tagli
 ]
 
 export default function QCMModal({ token, courseId, sectionId, scopeLabel, onClose }: Props) {
+  const { refresh: refreshGamification } = useGamification()
   const [stage, setStage] = useState<Stage>('pick')
   const [difficulty, setDifficulty] = useState<QCMDifficulty>('medium')
   const [questions, setQuestions] = useState<QCMQuestion[]>([])
@@ -72,6 +74,8 @@ export default function QCMModal({ token, courseId, sectionId, scopeLabel, onClo
       const out = await submitQCM(token, courseId, difficulty, questions, answers, sectionId)
       setResults(out)
       setStage('results')
+      // Surface XP/level/achievement toasts the backend awarded for this attempt.
+      void refreshGamification()
     } catch (e: unknown) {
       setErrorMsg(e instanceof Error ? e.message : 'Failed to submit quiz.')
       setStage('error')

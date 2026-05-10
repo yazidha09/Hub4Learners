@@ -6,6 +6,8 @@ import DashboardPage from './pages/DashboardPage'
 import CourseLearningPage from './pages/CourseLearningPage'
 import { PaymentSuccessPage, PaymentCancelPage } from './pages/PaymentResultPage'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { GamificationProvider } from './context/GamificationContext'
+import GamificationToasts from './components/gamification/GamificationToasts'
 import LoadingScreen from './components/LoadingScreen'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -24,16 +26,19 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
-          <Route path="/" element={<PublicRoute><HomePage /></PublicRoute>} />
-          <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
-          <Route path="/register" element={<PublicRoute><RegisterPage /></PublicRoute>} />
-          <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
-          <Route path="/learn/:courseId" element={<PrivateRoute><CourseLearningPage /></PrivateRoute>} />
-          <Route path="/payment/success" element={<PrivateRoute><PaymentSuccessPage /></PrivateRoute>} />
-          <Route path="/payment/cancel" element={<PrivateRoute><PaymentCancelPage /></PrivateRoute>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <GamificationProvider>
+          <Routes>
+            <Route path="/" element={<PublicRoute><HomePage /></PublicRoute>} />
+            <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
+            <Route path="/register" element={<PublicRoute><RegisterPage /></PublicRoute>} />
+            <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
+            <Route path="/learn/:courseId" element={<PrivateRoute><CourseLearningPage /></PrivateRoute>} />
+            <Route path="/payment/success" element={<PrivateRoute><PaymentSuccessPage /></PrivateRoute>} />
+            <Route path="/payment/cancel" element={<PrivateRoute><PaymentCancelPage /></PrivateRoute>} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+          <GamificationToasts />
+        </GamificationProvider>
       </AuthProvider>
     </BrowserRouter>
   )

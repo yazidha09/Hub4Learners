@@ -763,6 +763,37 @@ def get_course_progress(student_id: str, course_id: str, db: Session) -> CourseP
     )
 
 
+def is_item_completed(
+    student_id: str,
+    subsection_id: Optional[str],
+    material_id: Optional[str],
+    db: Session,
+) -> bool:
+    """True if the given subsection or material is already marked complete by
+    this student. Used by gamification to avoid awarding XP on re-clicks."""
+    if subsection_id:
+        return (
+            db.query(CourseProgress.id)
+            .filter(
+                CourseProgress.student_id == UUID(student_id),
+                CourseProgress.subsection_id == UUID(subsection_id),
+            )
+            .first()
+            is not None
+        )
+    if material_id:
+        return (
+            db.query(CourseProgress.id)
+            .filter(
+                CourseProgress.student_id == UUID(student_id),
+                CourseProgress.material_id == UUID(material_id),
+            )
+            .first()
+            is not None
+        )
+    return False
+
+
 def mark_item_completed(
     student_id: str,
     course_id: str,
@@ -1079,9 +1110,27 @@ def toggle_publish(professor_id: str, course_id: str, db: Session) -> CourseOut:
     if str(course.professor_id) != professor_id:
         raise HTTPException(status_code=403, detail="Not your course")
 
+    was_published = course.is_published
     course.is_published = not course.is_published
     db.commit()
     db.refresh(course)
+
+    # Gamification — award publish XP only on the unpublished → published edge,
+    # and the XP service dedups by source_id so re-publishing the same course
+    # never grants twice.
+    if not was_published and course.is_published:
+        try:
+            from app.controller.gamification import xp_service
+            xp_service.award_xp(
+                user_id=professor_id,
+                source_type="course_published",
+                source_id=str(course.id),
+                description=f'Published course "{course.title}"',
+                db=db,
+            )
+        except Exception:
+            pass
+
     return _build_course_out(course, db)
 
 
@@ -1133,6 +1182,21 @@ def enroll_student(
     db.add(enrollment)
     db.commit()
     db.refresh(enrollment)
+
+    # Gamification — reward the course owner for each new enrollment.
+    # source_id ties the grant to (course, student) so re-enroll can't double-grant.
+    try:
+        from app.controller.gamification import xp_service
+        xp_service.award_xp(
+            user_id=str(course.professor_id),
+            source_type="student_enrolled",
+            source_id=f"{course_id}:{student_id}",
+            description=f'New enrollment in "{course.title}"',
+            db=db,
+        )
+    except Exception:
+        pass
+
     return EnrollmentOut(
         id=enrollment.id,
         student_id=enrollment.student_id,
@@ -1322,6 +1386,31 @@ def create_feedback(user_id: str, course_id: str, rating: int, comment, db: Sess
     db.add(fb)
     db.commit()
     db.refresh(fb)
+
+    # Gamification — reward the course owner for receiving a rating.
+    # Bonus XP on 5-star reviews. One-shot per (course, rater) thanks to the
+    # unique-feedback constraint above (which raises 409 on retries).
+    course = db.query(Course).filter(Course.id == UUID(course_id)).first()
+    if course:
+        try:
+            from app.controller.gamification import xp_service
+            xp_service.award_xp(
+                user_id=str(course.professor_id),
+                source_type="course_rated",
+                source_id=f"{course_id}:{user_id}",
+                description=f'New {rating}-star rating on "{course.title}"',
+                db=db,
+            )
+            if rating == 5:
+                xp_service.award_xp(
+                    user_id=str(course.professor_id),
+                    source_type="course_rated_5",
+                    source_id=f"{course_id}:{user_id}",
+                    description=f'5-star rating on "{course.title}"',
+                    db=db,
+                )
+        except Exception:
+            pass
 
     user = db.query(User).filter(User.id == UUID(user_id)).first()
     return FeedbackOut(

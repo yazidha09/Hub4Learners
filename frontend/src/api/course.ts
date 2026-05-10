@@ -232,19 +232,6 @@ export function addSubsection(
   })
 }
 
-export function uploadMaterial(
-  token: string,
-  courseId: string,
-  sectionId: string,
-  formData: FormData,
-): Promise<MaterialOut> {
-  return request<MaterialOut>(
-    `/courses/${courseId}/sections/${sectionId}/materials`,
-    token,
-    { method: 'POST', body: formData },
-  )
-}
-
 export function togglePublish(token: string, courseId: string): Promise<CourseOut> {
   return request<CourseOut>(`/courses/${courseId}/publish`, token, { method: 'PATCH' })
 }

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.controller import course_controller, notification_controller
+from app.controller.gamification import xp_service
 from app.controller.student_analytics_controller import get_student_analytics
 from app.controller.learner_analytics_controller import get_learner_analytics
 from app.database import get_db
@@ -406,9 +407,54 @@ def mark_progress(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    return course_controller.mark_item_completed(
-        current_user["sub"], course_id, body.subsection_id, body.material_id, db
+    # Was this item already completed before this call? If so, suppress XP.
+    user_id = current_user["sub"]
+    pre_already_done = course_controller.is_item_completed(
+        user_id, body.subsection_id, body.material_id, db,
     )
+    pre_progress = course_controller.get_course_progress(user_id, course_id, db)
+
+    result = course_controller.mark_item_completed(
+        user_id, course_id, body.subsection_id, body.material_id, db
+    )
+
+    # Award XP only on first completion of this item.
+    if not pre_already_done:
+        # Determine source: video material → video_watched, else lesson_complete.
+        source_type = "lesson_complete"
+        source_id = body.subsection_id or body.material_id
+        if body.material_id:
+            mat = db.query(CourseMaterial).filter(CourseMaterial.id == UUID(body.material_id)).first()
+            if mat and mat.type == "video":
+                source_type = "video_watched"
+        xp_service.award_xp(
+            user_id=user_id, source_type=source_type, source_id=str(source_id),
+            description=f"Completed item in course {course_id}", db=db,
+        )
+
+        # First time the course just hit 100%? Award course_complete XP, and
+        # reward the course owner (professor) too — one of their students just
+        # finished. Both are one-shot per (course, student) so they can't replay.
+        if pre_progress.progress_pct < 100.0 and result.progress_pct >= 100.0:
+            xp_service.award_xp(
+                user_id=user_id, source_type="course_complete",
+                source_id=course_id,
+                description=f"Completed course {course_id}", db=db,
+            )
+            course_obj = db.query(Course).filter(Course.id == UUID(course_id)).first()
+            if course_obj and str(course_obj.professor_id) != user_id:
+                try:
+                    xp_service.award_xp(
+                        user_id=str(course_obj.professor_id),
+                        source_type="student_completed_course",
+                        source_id=f"{course_id}:{user_id}",
+                        description=f'Student completed your course "{course_obj.title}"',
+                        db=db,
+                    )
+                except Exception:
+                    pass
+
+    return result
 
 
 @router.get("/{course_id}", response_model=CourseOut)

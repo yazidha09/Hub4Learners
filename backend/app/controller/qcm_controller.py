@@ -26,6 +26,7 @@ from app.schemas.qcm import (
     QCMSubmitOut,
 )
 from app.utils.rag import _strip_html, search_course
+from app.controller.gamification import xp_service
 
 GEN_MODEL = "gemini-3.1-flash-lite-preview"
 
@@ -293,6 +294,43 @@ def submit_qcm(
     db.add(attempt)
     db.commit()
     db.refresh(attempt)
+
+    # Gamification — award XP on the FIRST passed attempt for a given scope.
+    if passed:
+        scope_key = f"{course_id}:{section_id or 'course'}"
+        scope_filter = (
+            QCMAttempt.section_id == UUID(section_id)
+            if section_id else
+            QCMAttempt.section_id.is_(None)
+        )
+        already = (
+            db.query(QCMAttempt)
+            .filter(
+                QCMAttempt.student_id == UUID(student_id),
+                QCMAttempt.course_id == UUID(course_id),
+                scope_filter,
+                QCMAttempt.passed.is_(True),
+                QCMAttempt.id != attempt.id,
+            )
+            .first()
+        )
+        if not already:
+            xp_service.award_xp(
+                user_id=student_id,
+                source_type="quiz_pass",
+                source_id=scope_key,
+                description=f"Passed quiz ({diff})",
+                db=db,
+            )
+            if score == total and total > 0:
+                xp_service.award_xp(
+                    user_id=student_id,
+                    source_type="quiz_perfect_bonus",
+                    source_id=f"{scope_key}:perfect",
+                    amount=25,
+                    description="Perfect score bonus",
+                    db=db,
+                )
 
     return QCMSubmitOut(
         attempt_id=str(attempt.id),
