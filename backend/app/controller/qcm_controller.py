@@ -28,7 +28,7 @@ from app.schemas.qcm import (
 from app.utils.rag import _strip_html, search_course
 from app.controller.gamification import xp_service
 
-GEN_MODEL = "gemini-3.1-flash-lite-preview"
+GEN_MODEL = "gemini-3.1-flash-lite"
 
 DIFFICULTY_CONFIG = {
     "easy":   {"count": 5,  "style": "basic recall, definitions, and simple comprehension"},

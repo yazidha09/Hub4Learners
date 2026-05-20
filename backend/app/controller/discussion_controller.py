@@ -268,25 +268,29 @@ async def _notify_mentions(
     handles = set(_MENTION_RE.findall(content or ""))
     if not handles:
         return
-    # Match by first part of the full_name (lowercase, alphanum) — best-effort.
-    # We pull users whose full_name starts with any of the handles. This avoids
-    # exposing unrelated users via wide LIKE scans.
+    # Resolve mentions with a narrow ILIKE OR-list keyed off each handle,
+    # rather than scanning the entire users table. Postgres can use the
+    # full_name index (or a sequential scan over a small candidate set)
+    # in either direction.
+    from sqlalchemy import or_
+    handle_filters = [User.full_name.ilike(f"{h}%") for h in handles]
     candidates = (
-        db.query(User)
-        .filter(User.id != actor.id)
+        db.query(User.id, User.full_name)
+        .filter(User.id != actor.id, or_(*handle_filters))
+        .limit(50)
         .all()
     )
     notified: set = set()
-    for u in candidates:
-        first = re.sub(r"[^A-Za-z0-9_]", "", (u.full_name or "").split(" ")[0]).lower()
+    for uid, full_name in candidates:
+        first = re.sub(r"[^A-Za-z0-9_]", "", (full_name or "").split(" ")[0]).lower()
         if not first:
             continue
         for h in handles:
-            if h.lower() == first and u.id not in notified:
-                notified.add(u.id)
+            if h.lower() == first and uid not in notified:
+                notified.add(uid)
                 try:
                     await notification_controller.push(
-                        user_id=str(u.id),
+                        user_id=str(uid),
                         type="discussion_mention",
                         title=f"{actor.full_name} mentioned you",
                         body="You were mentioned in a lesson discussion.",

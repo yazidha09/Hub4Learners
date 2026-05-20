@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ReactNode } from 'react'
+import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
@@ -343,12 +343,18 @@ function BrowseCoursesSection({ token }: { token: string }) {
 
   useEffect(() => { load() }, [token, activeCat])
 
-  const enrolledIds = new Set(enrolled.map(c => c.id))
-  const filtered = courses.filter(c =>
-    !search.trim() ||
-    c.title.toLowerCase().includes(search.toLowerCase()) ||
-    c.professor_name.toLowerCase().includes(search.toLowerCase())
-  )
+  // Memoize derived data so unrelated state updates (typing in unrelated
+  // forms, opening modals, etc.) don't re-allocate a Set and re-scan the
+  // courses array each render.
+  const enrolledIds = useMemo(() => new Set(enrolled.map(c => c.id)), [enrolled])
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return courses
+    return courses.filter(c =>
+      c.title.toLowerCase().includes(q) ||
+      c.professor_name.toLowerCase().includes(q)
+    )
+  }, [courses, search])
 
   const handleEnroll = async (courseId: string) => {
     setErr(''); setEnrollingId(courseId)

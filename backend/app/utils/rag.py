@@ -148,7 +148,7 @@ def _index():
 
 # ── public API ────────────────────────────────────────────────────────────────
 
-_DETECT_MODEL = "gemini-3.1-flash-lite-preview"
+_DETECT_MODEL = "gemini-3.1-flash-lite"
 _VALID_DOMAINS = {
     "computer_science", "math", "physics", "chemistry", "biology",
     "english", "arabic", "french", "spanish",

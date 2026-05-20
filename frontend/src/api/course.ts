@@ -1,3 +1,5 @@
+import { cachedGet, invalidate } from './_client'
+
 const API_BASE = 'http://localhost:8000/api'
 
 export interface MaterialOut {
@@ -190,15 +192,17 @@ async function request<T>(path: string, token?: string, options?: RequestInit): 
 
 export function listPublishedCourses(categoryId?: string): Promise<CourseOut[]> {
   const query = categoryId ? `?category_id=${categoryId}` : ''
-  return request<CourseOut[]>(`/courses${query}`)
+  // Public catalog — safe to cache briefly. 30s TTL means rapid back/forward
+  // navigation is instant without showing stale data for long.
+  return cachedGet<CourseOut[]>(`/courses${query}`, undefined, 30_000)
 }
 
 export function getCourseDetail(courseId: string): Promise<CourseOut> {
-  return request<CourseOut>(`/courses/${courseId}`)
+  return cachedGet<CourseOut>(`/courses/${courseId}`, undefined, 15_000)
 }
 
 export function getMyCourses(token: string): Promise<CourseOut[]> {
-  return request<CourseOut[]>('/courses/my', token)
+  return cachedGet<CourseOut[]>('/courses/my', token, 10_000)
 }
 
 export function createCourse(token: string, formData: FormData): Promise<CourseOut> {
@@ -237,11 +241,12 @@ export function togglePublish(token: string, courseId: string): Promise<CourseOu
 }
 
 export function enrollInCourse(token: string, courseId: string): Promise<EnrollmentOut> {
+  invalidate('/courses')
   return request<EnrollmentOut>(`/courses/${courseId}/enroll`, token, { method: 'POST' })
 }
 
 export function getEnrolledCourses(token: string): Promise<CourseOut[]> {
-  return request<CourseOut[]>('/courses/enrolled', token)
+  return cachedGet<CourseOut[]>('/courses/enrolled', token, 10_000)
 }
 
 export function getMyStudents(token: string): Promise<CourseStudentsOut[]> {
@@ -249,10 +254,12 @@ export function getMyStudents(token: string): Promise<CourseStudentsOut[]> {
 }
 
 export function unenrollFromCourse(token: string, courseId: string): Promise<{ detail: string }> {
+  invalidate('/courses')
   return request<{ detail: string }>(`/courses/${courseId}/enroll`, token, { method: 'DELETE' })
 }
 
 export function deleteCourse(token: string, courseId: string): Promise<{ detail: string }> {
+  invalidate('/courses')
   return request<{ detail: string }>(`/courses/${courseId}`, token, { method: 'DELETE' })
 }
 
@@ -293,7 +300,9 @@ export function updateLessonBlock(
 // ── Progress tracking ────────────────────────────────────────────────────────
 
 export function getCourseProgress(token: string, courseId: string): Promise<CourseProgressOut> {
-  return request<CourseProgressOut>(`/courses/${courseId}/progress`, token)
+  // Short TTL — progress changes frequently while learning, but consecutive
+  // re-renders of the same lesson page shouldn't all re-fetch.
+  return cachedGet<CourseProgressOut>(`/courses/${courseId}/progress`, token, 5_000)
 }
 
 export function markItemCompleted(
@@ -302,6 +311,7 @@ export function markItemCompleted(
   subsectionId?: string,
   materialId?: string,
 ): Promise<CourseProgressOut> {
+  invalidate(`/courses/${courseId}/progress`)
   return request<CourseProgressOut>(`/courses/${courseId}/progress`, token, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -310,7 +320,9 @@ export function markItemCompleted(
 }
 
 export function getCourseAnalytics(token: string): Promise<CourseAnalyticsOut> {
-  return request<CourseAnalyticsOut>('/courses/my/analytics', token)
+  // Analytics endpoints are expensive on the backend (multi-table aggregates).
+  // 60s TTL is a comfortable window: dashboards refresh on user action anyway.
+  return cachedGet<CourseAnalyticsOut>('/courses/my/analytics', token, 60_000)
 }
 
 // ── Student analytics ────────────────────────────────────────────────────────
@@ -399,7 +411,7 @@ export interface StudentAnalyticsOut {
 }
 
 export function getStudentAnalytics(token: string): Promise<StudentAnalyticsOut> {
-  return request<StudentAnalyticsOut>('/courses/student/analytics', token)
+  return cachedGet<StudentAnalyticsOut>('/courses/student/analytics', token, 60_000)
 }
 
 // ── Professor learner analytics ──────────────────────────────────────────────
@@ -473,7 +485,7 @@ export interface LearnerAnalyticsOut {
 }
 
 export function getLearnerAnalytics(token: string): Promise<LearnerAnalyticsOut> {
-  return request<LearnerAnalyticsOut>('/courses/professor/learners/analytics', token)
+  return cachedGet<LearnerAnalyticsOut>('/courses/professor/learners/analytics', token, 60_000)
 }
 
 // ── Feedback ─────────────────────────────────────────────────────────────────
@@ -489,11 +501,13 @@ export interface FeedbackOut {
 }
 
 export function getCourseFeedback(courseId: string): Promise<FeedbackOut[]> {
-  return request<FeedbackOut[]>(`/courses/${courseId}/feedback`)
+  return cachedGet<FeedbackOut[]>(`/courses/${courseId}/feedback`, undefined, 30_000)
 }
 
 export function getCourseFeedbackSummaries(): Promise<Record<string, { avg_rating: number; count: number }>> {
-  return request('/courses/feedback-summaries')
+  return cachedGet<Record<string, { avg_rating: number; count: number }>>(
+    '/courses/feedback-summaries', undefined, 60_000,
+  )
 }
 
 export function submitFeedback(
@@ -502,6 +516,8 @@ export function submitFeedback(
   rating: number,
   comment?: string,
 ): Promise<FeedbackOut> {
+  invalidate(`/courses/${courseId}/feedback`)
+  invalidate('/courses/feedback-summaries')
   return request<FeedbackOut>(`/courses/${courseId}/feedback`, token, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

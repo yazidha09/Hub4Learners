@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { listCategories, type CategoryOut } from '../api/category'
+import { getPublicStats, formatCount, type PublicStats } from '../api/public'
 
 const ArrowRight = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -39,23 +40,25 @@ const steps = [
   { n: '03', title: 'Learn & grow', desc: 'Progress at your own pace.' },
 ]
 
-const stats = [
-  { v: '12k+', l: 'Students' },
-  { v: '100+', l: 'Courses' },
-  { v: '30+', l: 'Subjects' },
-  { v: '4.9', l: 'Avg. rating' },
-]
-
 export default function HomePage() {
   const [scrolled, setScrolled] = useState(false)
   const [categories, setCategories] = useState<CategoryOut[]>([])
+  const [liveStats, setLiveStats] = useState<PublicStats | null>(null)
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40)
     window.addEventListener('scroll', onScroll, { passive: true })
     listCategories().then(setCategories).catch(() => {})
+    getPublicStats().then(setLiveStats).catch(() => {})
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
+
+  const stats = [
+    { v: liveStats ? formatCount(liveStats.students) : '—', l: 'Students' },
+    { v: liveStats ? formatCount(liveStats.courses) : '—', l: 'Courses' },
+    { v: liveStats ? formatCount(liveStats.subjects) : '—', l: 'Subjects' },
+    { v: liveStats?.avg_rating != null ? liveStats.avg_rating.toFixed(1) : '—', l: 'Avg. rating' },
+  ]
 
   return (
     <div className="min-h-screen bg-[#0C0C0F] text-white">

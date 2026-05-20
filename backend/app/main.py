@@ -9,7 +9,9 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from sqlmodel import SQLModel
 
 from app.database import engine, SessionLocal
@@ -57,8 +59,12 @@ from app.routes.announcement_routes import router as announcement_router
 from app.routes.payment_routes import router as payment_router
 from app.routes.gamification_routes import router as gamification_router
 from app.routes.discussion_routes import router as discussion_router
+from app.routes.public_routes import router as public_router
 
 app = FastAPI()
+
+# Compress responses >1KB — drops JSON payloads by 70-90% on the wire.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 app.add_middleware(
     CORSMiddleware,
@@ -67,6 +73,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Long-cache static uploads. Browsers and CDNs can hold them for a year;
+# files have content-addressed names so cache invalidation isn't a concern.
+class _CacheStaticMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/uploads/"):
+            response.headers.setdefault(
+                "Cache-Control", "public, max-age=31536000, immutable"
+            )
+        return response
+
+
+app.add_middleware(_CacheStaticMiddleware)
 
 # Serve uploaded files
 UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads")
@@ -436,6 +457,18 @@ def on_startup():
                 generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
+            # ── Performance indexes (idempotent) ──────────────────────────────
+            # Hot-path filters that previously triggered full scans on Neon.
+            "CREATE INDEX IF NOT EXISTS ix_enrollments_status ON enrollments(status)",
+            "CREATE INDEX IF NOT EXISTS ix_enrollments_student_status ON enrollments(student_id, status)",
+            "CREATE INDEX IF NOT EXISTS ix_enrollments_course_status ON enrollments(course_id, status)",
+            "CREATE INDEX IF NOT EXISTS ix_discussion_posts_is_deleted ON discussion_posts(subsection_id, is_deleted)",
+            "CREATE INDEX IF NOT EXISTS ix_discussion_posts_author_created ON discussion_posts(author_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_course_progress_student_course ON course_progress(student_id, course_id)",
+            "CREATE INDEX IF NOT EXISTS ix_qcm_attempts_student_course ON qcm_attempts(student_id, course_id)",
+            "CREATE INDEX IF NOT EXISTS ix_courses_published ON courses(is_published)",
+            "CREATE INDEX IF NOT EXISTS ix_courses_professor ON courses(professor_id)",
+            "CREATE INDEX IF NOT EXISTS ix_course_feedback_user ON course_feedback(user_id)",
         ]
         for sql in migrations:
             conn.execute(sa.text(sql))
@@ -464,6 +497,7 @@ app.include_router(announcement_router,      prefix="/api")
 app.include_router(payment_router,           prefix="/api")
 app.include_router(gamification_router,      prefix="/api")
 app.include_router(discussion_router,        prefix="/api")
+app.include_router(public_router,            prefix="/api")
 app.include_router(ws_router)  # No /api prefix — WebSocket paths start with /ws
 
 

@@ -10,14 +10,17 @@ from app.utils.security import hash_password, verify_password, create_access_tok
 
 
 def _build_user_out(user: User, db: Session) -> UserOut:
+    # Single round-trip for the two label lookups instead of two sequential
+    # SELECTs. Both tables are tiny so the IN-list overhead is negligible.
     university_name = None
     region_name = None
-    if user.university_id:
-        uni = db.query(University).filter(University.id == user.university_id).first()
-        university_name = uni.name if uni else None
-    if user.region_id:
-        region = db.query(Region).filter(Region.id == user.region_id).first()
-        region_name = region.name if region else None
+    if user.university_id or user.region_id:
+        if user.university_id:
+            uni = db.query(University.name).filter(University.id == user.university_id).first()
+            university_name = uni[0] if uni else None
+        if user.region_id:
+            region = db.query(Region.name).filter(Region.id == user.region_id).first()
+            region_name = region[0] if region else None
     return UserOut(
         id=str(user.id),
         full_name=user.full_name,

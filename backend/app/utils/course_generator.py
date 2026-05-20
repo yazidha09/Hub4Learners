@@ -28,7 +28,7 @@ from app.utils.pdf_parser import PDFChunk, PDFLine, lines_to_html
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-_MODEL = "gemini-3.1-flash-lite-preview"
+_MODEL = "gemini-3.1-flash-lite"
 _MAX_RETRIES = 3
 _MAX_OUTLINE_CHARS = 60_000   # cap of chunk text we send for outline inference
 

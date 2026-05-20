@@ -102,13 +102,6 @@ const BASE_NAV: NavItem[] = [
 ]
 const ANNOUNCEMENTS_NAV_ITEM: NavItem = { id: 'announcements', label: 'Announcements', icon: <MegaphoneIcon /> }
 
-/* ── Mock data (home only) ── */
-const ACTIVITY = [
-  { student: 'Amine B.', action: 'submitted Assignment 3 in', course: 'Machine Learning', time: '2m ago' },
-  { student: 'Yasmine K.', action: 'asked a question in', course: 'Deep Learning', time: '15m ago' },
-  { student: 'Karim M.', action: 'completed Quiz 5 in', course: 'Neural Networks', time: '1h ago' },
-]
-
 /* ── University affiliation card (request-based) ── */
 function UniversityCard({ token }: { token: string }) {
   const { user } = useAuth()
@@ -3915,27 +3908,6 @@ export default function ProfessorDashboard() {
         {/* University affiliation */}
         <div className="mb-10">
           <UniversityCard token={token!} />
-        </div>
-
-        {/* Activity */}
-        <div>
-          <h2 className="text-[0.66rem] font-bold tracking-[0.14em] uppercase text-[#94A3B8] mb-4">Recent activity</h2>
-          <div className="bg-white border border-[#E5E7EB] rounded-xl divide-y divide-[#F1F3F5] overflow-hidden">
-            {ACTIVITY.map((a, i) => (
-              <div key={i} className="flex items-start gap-3 px-5 py-4">
-                <div className="w-9 h-9 rounded-full bg-[#F1F3F5] text-[#64748B] flex items-center justify-center text-[0.7rem] font-semibold uppercase shrink-0">
-                  {a.student.split(' ').map(w => w[0]).join('')}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[0.85rem] text-[#0C0C0F] m-0 leading-relaxed">
-                    <span className="font-semibold">{a.student}</span>{' '}{a.action}{' '}
-                    <span className="font-semibold">{a.course}</span>
-                  </p>
-                </div>
-                <span className="text-[0.72rem] text-[#94A3B8] shrink-0 mt-0.5">{a.time}</span>
-              </div>
-            ))}
-          </div>
         </div>
       </div>
     </DashboardLayout>

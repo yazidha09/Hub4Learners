@@ -1,3 +1,5 @@
+import { cachedGet, invalidate } from './_client'
+
 const API_BASE = 'http://localhost:8000/api'
 
 export type DiscussionSort = 'relevant' | 'top' | 'new' | 'old'
@@ -63,6 +65,10 @@ async function request<T>(path: string, token: string, options: RequestInit = {}
   return (await res.json()) as T
 }
 
+function discussionInvalidate(subsectionId: string) {
+  invalidate(`/discussions/subsections/${subsectionId}`)
+}
+
 export function listDiscussionPosts(
   token: string,
   subsectionId: string,
@@ -70,9 +76,13 @@ export function listDiscussionPosts(
   limit = 20,
   offset = 0,
 ): Promise<DiscussionListOut> {
-  return request(
+  // Discussion threads are read way more than they're written. A 10s TTL +
+  // in-flight dedup eliminates the duplicate fetch StrictMode triggers on
+  // mount, and the redundant re-fetch when a user toggles between tabs.
+  return cachedGet<DiscussionListOut>(
     `/discussions/subsections/${subsectionId}?sort=${sort}&limit=${limit}&offset=${offset}`,
     token,
+    10_000,
   )
 }
 
@@ -81,6 +91,7 @@ export function createDiscussionPost(
   subsectionId: string,
   content: string,
 ): Promise<DiscussionPostOut> {
+  discussionInvalidate(subsectionId)
   return request(`/discussions/subsections/${subsectionId}`, token, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -93,6 +104,7 @@ export function replyToDiscussionPost(
   postId: string,
   content: string,
 ): Promise<DiscussionPostOut> {
+  invalidate('/discussions/subsections/')
   return request(`/discussions/${postId}/replies`, token, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -105,6 +117,7 @@ export function editDiscussionPost(
   postId: string,
   content: string,
 ): Promise<DiscussionPostOut> {
+  invalidate('/discussions/subsections/')
   return request(`/discussions/${postId}`, token, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -113,6 +126,7 @@ export function editDiscussionPost(
 }
 
 export function deleteDiscussionPost(token: string, postId: string): Promise<void> {
+  invalidate('/discussions/subsections/')
   return request(`/discussions/${postId}`, token, { method: 'DELETE' })
 }
 
@@ -120,6 +134,7 @@ export function toggleDiscussionVote(
   token: string,
   postId: string,
 ): Promise<DiscussionVoteOut> {
+  invalidate('/discussions/subsections/')
   return request(`/discussions/${postId}/vote`, token, { method: 'POST' })
 }
 
@@ -139,13 +154,18 @@ export function getDiscussionSummary(
   token: string,
   subsectionId: string,
 ): Promise<DiscussionSummaryOut> {
-  return request(`/discussions/subsections/${subsectionId}/summary`, token)
+  // Summary is expensive to regenerate on the backend (Gemini call); cache
+  // the summary status check for a minute.
+  return cachedGet<DiscussionSummaryOut>(
+    `/discussions/subsections/${subsectionId}/summary`, token, 60_000,
+  )
 }
 
 export function regenerateDiscussionSummary(
   token: string,
   subsectionId: string,
 ): Promise<DiscussionSummaryOut> {
+  invalidate(`/discussions/subsections/${subsectionId}/summary`)
   return request(`/discussions/subsections/${subsectionId}/summary/regenerate`, token, {
     method: 'POST',
   })

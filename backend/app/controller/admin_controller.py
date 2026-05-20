@@ -2,6 +2,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.user import User
@@ -20,6 +21,19 @@ from app.utils.security import VALID_ROLES, ROLE_RANK
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
+
+def get_public_stats(db: Session) -> dict:
+    students = db.query(User).filter(User.role == "student").count()
+    courses = db.query(Course).filter(Course.is_published == True).count()  # noqa: E712
+    subjects = db.query(Category).count()
+    avg = db.query(func.avg(CourseFeedback.rating)).scalar()
+    return {
+        "students": students,
+        "courses": courses,
+        "subjects": subjects,
+        "avg_rating": round(float(avg), 1) if avg is not None else None,
+    }
+
 
 def get_platform_stats(db: Session) -> dict:
     total_users = db.query(User).count()

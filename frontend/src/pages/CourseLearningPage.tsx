@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -428,8 +428,8 @@ export default function CourseLearningPage() {
 
   const isCurrentItemDone = (): boolean => {
     if (!progress) return false
-    if (activeSubsection) return progress.completed_subsection_ids.includes(activeSubsection.id)
-    if (activeMaterial) return progress.completed_material_ids.includes(activeMaterial.id)
+    if (activeSubsection) return completedSubSet.has(activeSubsection.id)
+    if (activeMaterial) return completedMatSet.has(activeMaterial.id)
     return false
   }
 
@@ -490,24 +490,44 @@ export default function CourseLearningPage() {
   }
 
   /* ─── Section / course completion helpers (used to gate quiz cards) ─── */
+  // Look up completion via a memoized Set instead of Array.includes per check —
+  // turns each section-done check from O(N) to O(1) and avoids reallocating
+  // the underlying arrays each render.
+  const completedSubSet = useMemo(
+    () => new Set(progress?.completed_subsection_ids ?? []),
+    [progress?.completed_subsection_ids],
+  )
+  const completedMatSet = useMemo(
+    () => new Set(progress?.completed_material_ids ?? []),
+    [progress?.completed_material_ids],
+  )
+
   const isSectionDone = (section: CourseOut['sections'][number]): boolean => {
     if (!progress) return false
     const subs = section.subsections ?? []
     const mats = section.materials ?? []
     if (subs.length === 0 && mats.length === 0) return false
-    const subsDone = subs.every(s => progress.completed_subsection_ids.includes(s.id))
+    const subsDone = subs.every(s => completedSubSet.has(s.id))
     const matsDone = subs.length === 0
-      ? mats.every(m => progress.completed_material_ids.includes(m.id))
+      ? mats.every(m => completedMatSet.has(m.id))
       : true
     return subsDone && matsDone
   }
 
+  // Precompute the best attempt per section_id once when qcmAttempts changes.
+  // Previously every render scanned all attempts once per section.
+  const bestAttemptBySection = useMemo(() => {
+    const map = new Map<string, QCMAttemptOut>()
+    for (const a of qcmAttempts) {
+      const key = a.section_id ?? '__final__'
+      const prev = map.get(key)
+      if (!prev || a.score_pct > prev.score_pct) map.set(key, a)
+    }
+    return map
+  }, [qcmAttempts])
+
   const bestAttemptFor = (sectionId?: string): QCMAttemptOut | undefined => {
-    const filtered = qcmAttempts.filter(a =>
-      sectionId ? a.section_id === sectionId : !a.section_id
-    )
-    if (filtered.length === 0) return undefined
-    return filtered.reduce((best, cur) => (cur.score_pct > best.score_pct ? cur : best))
+    return bestAttemptBySection.get(sectionId ?? '__final__')
   }
 
   if (loading) {
@@ -534,7 +554,21 @@ export default function CourseLearningPage() {
     )
   }
 
-  const sortedSections = [...(course.sections || [])].sort((a, b) => a.order_index - b.order_index)
+  // Sorting sections / subsections / materials was happening on every render
+  // — including inside .map() in the sidebar. Memoize the fully-sorted
+  // hierarchy so it only recomputes when the course payload actually changes.
+  type SortedSection = typeof course.sections[number] & {
+    sortedSubs: typeof course.sections[number]['subsections']
+    sortedMats: typeof course.sections[number]['materials']
+  }
+  const sortedSections: SortedSection[] = useMemo(() => {
+    const sections = [...(course.sections || [])].sort((a, b) => a.order_index - b.order_index)
+    return sections.map((s) => ({
+      ...s,
+      sortedSubs: [...(s.subsections ?? [])].sort((a, b) => a.order_index - b.order_index),
+      sortedMats: [...(s.materials ?? [])].sort((a, b) => a.order_index - b.order_index),
+    }))
+  }, [course])
 
   return (
     <div className="h-screen flex flex-col bg-[#0C0C0F] text-white overflow-hidden">
@@ -662,11 +696,10 @@ export default function CourseLearningPage() {
 
           <div className="flex-1 overflow-y-auto scrollbar-thin py-1">
             {sortedSections.map((section, si) => {
-              const sortedSubs = [...(section.subsections ?? [])].sort((a, b) => a.order_index - b.order_index)
-              const sortedMats = [...(section.materials ?? [])].sort((a, b) => a.order_index - b.order_index)
+              const { sortedSubs, sortedMats } = section
               const totalItems = sortedSubs.length || sortedMats.length
-              const doneItems = sortedSubs.filter(s => progress?.completed_subsection_ids.includes(s.id)).length
-                + sortedMats.filter(m => progress?.completed_material_ids.includes(m.id)).length
+              const doneItems = sortedSubs.filter(s => completedSubSet.has(s.id)).length
+                + sortedMats.filter(m => completedMatSet.has(m.id)).length
               return (
                 <div key={section.id} className="mb-1">
                   {/* Section header */}
@@ -681,7 +714,7 @@ export default function CourseLearningPage() {
                   {/* Subsections */}
                   {sortedSubs.map((sub, subIdx) => {
                     const isActive = activeSubsection?.id === sub.id
-                    const isDone = progress?.completed_subsection_ids.includes(sub.id) ?? false
+                    const isDone = completedSubSet.has(sub.id)
                     return (
                       <button
                         key={sub.id}
@@ -719,7 +752,7 @@ export default function CourseLearningPage() {
                   {/* Legacy materials */}
                   {sortedSubs.length === 0 && sortedMats.map((mat) => {
                     const isActive = activeMaterial?.id === mat.id
-                    const isDone = progress?.completed_material_ids.includes(mat.id) ?? false
+                    const isDone = completedMatSet.has(mat.id)
                     return (
                       <button
                         key={mat.id}

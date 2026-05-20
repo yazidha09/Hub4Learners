@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { loginUser } from '../api/auth'
 import { useAuth } from '../context/AuthContext'
+import { getPublicStats, formatCount, type PublicStats } from '../api/public'
 
 const EyeIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -32,8 +33,19 @@ export default function LoginPage() {
   const [showPwd, setShowPwd] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [liveStats, setLiveStats] = useState<PublicStats | null>(null)
   const navigate = useNavigate()
   const { login } = useAuth()
+
+  useEffect(() => {
+    getPublicStats().then(setLiveStats).catch(() => {})
+  }, [])
+
+  const stats = [
+    { label: 'Students', value: liveStats ? formatCount(liveStats.students) : '—' },
+    { label: 'Courses', value: liveStats ? formatCount(liveStats.courses) : '—' },
+    { label: 'Rating', value: liveStats?.avg_rating != null ? liveStats.avg_rating.toFixed(1) : '—' },
+  ]
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm({ ...form, [e.target.name]: e.target.value })
@@ -72,11 +84,7 @@ export default function LoginPage() {
             No clutter, no AI feel — just focused learning with verified professors and clean resources.
           </p>
           <div className="grid grid-cols-3 gap-4 pt-2">
-            {[
-              { label: 'Students', value: '12k+' },
-              { label: 'Courses', value: '100+' },
-              { label: 'Rating', value: '4.9' },
-            ].map(stat => (
+            {stats.map(stat => (
               <div key={stat.label} className="rounded-xl bg-white/5 border border-white/10 px-4 py-3 backdrop-blur">
                 <p className="text-[1.25rem] font-black">{stat.value}</p>
                 <p className="text-[0.78rem] uppercase tracking-[0.12em] text-white/60">{stat.label}</p>

@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { registerUser } from '../api/auth'
 import { useAuth } from '../context/AuthContext'
+import { getPublicStats, formatCount, type PublicStats } from '../api/public'
 
 const EyeIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -133,8 +134,20 @@ export default function RegisterPage() {
   const [showConfirm, setShowConfirm] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [liveStats, setLiveStats] = useState<PublicStats | null>(null)
   const navigate = useNavigate()
   const { login } = useAuth()
+
+  useEffect(() => {
+    getPublicStats().then(setLiveStats).catch(() => {})
+  }, [])
+
+  const stats = [
+    { label: 'Free to start', value: '0 DA' },
+    { label: 'Subjects', value: liveStats ? formatCount(liveStats.subjects) : '—' },
+    { label: 'Courses', value: liveStats ? formatCount(liveStats.courses) : '—' },
+    { label: 'Learners', value: liveStats ? formatCount(liveStats.students) : '—' },
+  ]
 
   const handleRoleSelect = (r: 'student' | 'professor') => {
     setRole(r)
@@ -190,12 +203,7 @@ export default function RegisterPage() {
             Join thousands of learners and professors sharing verified, human-crafted courses — without AI-generated noise.
           </p>
           <div className="grid grid-cols-2 gap-4 pt-2">
-            {[
-              { label: 'Free to start', value: '0 DA' },
-              { label: 'Subjects', value: '30+' },
-              { label: 'Courses', value: '100+' },
-              { label: 'Learners', value: '12k+' },
-            ].map(stat => (
+            {stats.map(stat => (
               <div key={stat.label} className="rounded-xl bg-white/5 border border-white/10 px-4 py-3 backdrop-blur">
                 <p className="text-[1.1rem] font-black">{stat.value}</p>
                 <p className="text-[0.78rem] uppercase tracking-[0.12em] text-white/60">{stat.label}</p>

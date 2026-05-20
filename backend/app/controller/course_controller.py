@@ -1431,19 +1431,30 @@ def get_course_feedback(course_id: str, db: Session) -> List[FeedbackOut]:
         .order_by(CourseFeedback.created_at.desc())
         .all()
     )
-    result = []
-    for fb in rows:
-        user = db.query(User).filter(User.id == fb.user_id).first()
-        result.append(FeedbackOut(
+    if not rows:
+        return []
+
+    # Batch-load user names in a single query (was N+1 before).
+    user_ids = list({fb.user_id for fb in rows})
+    name_by_user = {
+        uid: name
+        for uid, name in db.query(User.id, User.full_name)
+        .filter(User.id.in_(user_ids))
+        .all()
+    }
+
+    return [
+        FeedbackOut(
             id=fb.id,
             course_id=fb.course_id,
             user_id=fb.user_id,
-            user_name=user.full_name if user else "Unknown",
+            user_name=name_by_user.get(fb.user_id, "Unknown"),
             rating=fb.rating,
             comment=fb.comment,
             created_at=fb.created_at,
-        ))
-    return result
+        )
+        for fb in rows
+    ]
 
 
 def get_feedback_summaries(db: Session) -> dict:

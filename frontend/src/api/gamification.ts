@@ -1,3 +1,5 @@
+import { cachedGet, invalidate } from './_client'
+
 const API_BASE = 'http://localhost:8000/api'
 
 export type BadgeRarity = 'common' | 'rare' | 'epic' | 'legendary'
@@ -120,38 +122,41 @@ async function request<T>(
 }
 
 export function getMyGamification(token: string) {
-  return request<GamificationProfile>('/gamification/profile', token)
+  return cachedGet<GamificationProfile>('/gamification/profile', token, 15_000)
 }
 
 export function getUserGamification(token: string, userId: string) {
-  return request<GamificationProfile>(`/gamification/profile/${userId}`, token)
+  return cachedGet<GamificationProfile>(`/gamification/profile/${userId}`, token, 30_000)
 }
 
 export function getXPLogs(token: string, limit = 50) {
-  return request<XPLogEntry[]>(`/gamification/xp/logs?limit=${limit}`, token)
+  return cachedGet<XPLogEntry[]>(`/gamification/xp/logs?limit=${limit}`, token, 15_000)
 }
 
 export function claimDailyLogin(token: string) {
+  invalidate('/gamification/')
   return request<XPGain>('/gamification/daily-login', token, { method: 'POST' })
 }
 
 export function listAchievements(token: string) {
-  return request<Achievement[]>('/gamification/achievements', token)
+  return cachedGet<Achievement[]>('/gamification/achievements', token, 30_000)
 }
 
 export function markAchievementsSeen(token: string) {
+  invalidate('/gamification/achievements')
   return request<{ marked: number }>('/gamification/achievements/seen', token, { method: 'POST' })
 }
 
 export function listBadges(token: string) {
-  return request<Badge[]>('/gamification/badges', token)
+  return cachedGet<Badge[]>('/gamification/badges', token, 30_000)
 }
 
 export function listBadgesForUser(token: string, userId: string) {
-  return request<Badge[]>(`/gamification/badges/${userId}`, token)
+  return cachedGet<Badge[]>(`/gamification/badges/${userId}`, token, 30_000)
 }
 
 export function equipBadge(token: string, badgeId: string | null) {
+  invalidate('/gamification/')
   return request<Badge[]>('/gamification/badges/equip', token, {
     method: 'POST',
     body: JSON.stringify({ badge_id: badgeId }),
@@ -171,25 +176,47 @@ export function getLeaderboard(
     page: String(page),
     page_size: String(pageSize),
   })
-  return request<Leaderboard>(`/gamification/leaderboard?${qs}`, token)
+  // Leaderboard is one of the heaviest aggregates on the backend — cache 45s.
+  return cachedGet<Leaderboard>(`/gamification/leaderboard?${qs}`, token, 45_000)
 }
 
 // ── Level math (mirrors backend leveling.py) ────────────────────────────────
+// The XP curve is fixed: level N's threshold = Σ(i^1.5) for i in [1, N-1].
+// We precompute the whole 1..MAX_LEVEL table once on module load so every
+// subsequent call is an O(1) array lookup. Previously each call ran an O(L)
+// loop, and `calculateLevelFromXP` ran O(L²) total — a hot path for the
+// gamification UI.
 const BASE_XP = 100
 const EXPONENT = 1.5
+const MAX_LEVEL = 100
+
+const XP_TABLE: number[] = (() => {
+  const table = new Array(MAX_LEVEL + 2).fill(0)
+  let sum = 0
+  for (let level = 2; level <= MAX_LEVEL + 1; level += 1) {
+    sum += (level - 1) ** EXPONENT
+    table[level] = Math.round(BASE_XP * sum)
+  }
+  return table
+})()
 
 export function xpRequiredForLevel(level: number): number {
   if (level <= 1) return 0
-  let sum = 0
-  for (let i = 1; i < level; i++) sum += i ** EXPONENT
-  return Math.round(BASE_XP * sum)
+  if (level > MAX_LEVEL + 1) return XP_TABLE[MAX_LEVEL + 1]
+  return XP_TABLE[level]
 }
 
 export function calculateLevelFromXP(xp: number): number {
   if (xp <= 0) return 1
-  let level = 1
-  while (level < 100 && xpRequiredForLevel(level + 1) <= xp) level += 1
-  return level
+  // Binary search over the precomputed table.
+  let lo = 1
+  let hi = MAX_LEVEL
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >>> 1
+    if (XP_TABLE[mid] <= xp) lo = mid
+    else hi = mid - 1
+  }
+  return lo
 }
 
 export function levelProgressFromXP(xp: number) {
