@@ -1,146 +1,217 @@
-# Sprint 3 — AI Learning Features
-**Weeks 5–6 | Story Points: 43**
+# Sprint 3 — AI-Assisted Learning
+
+**Weeks 5–6**
 
 ## Introduction
 
-Sprint 3 integrates the platform's AI capabilities, transforming passive content consumption into an interactive learning experience. Students gain access to an AI Tutor powered by a RAG pipeline (Pinecone + Gemini) that answers questions strictly grounded in course materials. Professors can generate an entire course structure from a PDF upload, and automated knowledge checks appear at the end of each lesson.
+Sprint 3 turns Hub4Learners from a static content host into an AI-grounded learning environment. Every published course is chunked, embedded with `gemini-embedding-001` (768-dim), and upserted into Pinecone. Students get a course-scoped AI tutor whose answers are RAG-grounded against those vectors, AI-generated multiple-choice quizzes per section, and on-demand markdown recaps of an entire course. Professors get a PDF-to-course pipeline that turns an uploaded PDF into a draft course skeleton they can review, edit, and import.
 
 ## Sprint Goal
 
-> Integrate AI-powered learning capabilities into the platform, enabling students to interact with course content through an intelligent tutor, receive automated knowledge checks, and allowing professors to accelerate course creation through PDF-based AI generation.
+> Add AI tutoring, AI-generated MCQ quizzes, and AI-assisted course creation — all grounded in the actual course content (RAG) rather than free-form LLM hallucination.
 
 ---
 
 ## User Stories
 
-### Student
+### Student — AI Tutor & Quizzes
 
 | ID | Priority | User Story | Subtasks |
 |---|---|---|---|
-| US-19 | High | As a student, I can ask the AI Tutor questions about the current lesson and receive answers grounded in course materials | T-3.1: AI Tutor panel UI · T-3.2: POST /ai/chat · T-3.3: RAG retrieval from Pinecone · T-3.4: Gemini answer generation |
-| US-20 | High | As a student, I can use suggested prompts (Summarize, Key concepts, Quiz me) to interact with the AI Tutor quickly | T-3.5: Prompt chip UI · T-3.6: Pre-fill chat input on click |
-| US-21 | High | As a student, I receive AI-generated knowledge check questions at the end of each lesson | T-3.7: Knowledge check UI · T-3.8: GET /ai/qcm/{subsection_id} · T-3.9: Render QCM with scoring |
-| US-22 | Medium | As a student, I can view an AI-generated summary of a discussion thread to catch up quickly | T-3.10: Summary button in discussion · T-3.11: POST /ai/summarize · T-3.12: Display summary card |
+| US-3.1 | High | As a student, I can chat with a course-scoped AI tutor that only answers from the course content | T-3.1.1: `POST /api/ai/chat` · T-3.1.2: `search_course()` retrieves top chunks with `MIN_SCORE=0.40` · T-3.1.3: `chat_with_context()` calls `gemini-3.1-flash-lite` |
+| US-3.2 | High | As a student, when a course has DB text but no Pinecone vectors, the system self-heals by reindexing in the background | T-3.2.1: `course_index_stats()` check · T-3.2.2: `index_course_bg()` kick-off · T-3.2.3: Honest "no context" reply for current message |
+| US-3.3 | High | As a student, I can generate an MCQ quiz on a section at beginner / intermediate / advanced difficulty | T-3.3.1: `POST /api/ai/qcm/generate` · T-3.3.2: `qcm_controller.generate_qcm()` · T-3.3.3: Prompt Gemini with section content |
+| US-3.4 | High | As a student, I can submit my QCM answers and get a score, pass/fail (≥70%), and stored attempt | T-3.4.1: `POST /api/ai/qcm/submit` · T-3.4.2: `QCMAttempt` with `score`, `total`, `passed` · T-3.4.3: Award `quiz_pass` + `quiz_perfect_bonus` XP |
+| US-3.5 | Medium | As a student, I can view my QCM attempt history for a course | T-3.5.1: `GET /api/ai/qcm/history?course_id=…` · T-3.5.2: `list_attempts()` |
+| US-3.6 | Medium | As a student, I can request an AI-generated markdown summary of an entire course | T-3.6.1: `POST /api/ai/course-summary/{course_id}` · T-3.6.2: `generate_course_summary()` with structured sections · T-3.6.3: Persist into `Course.ai_summary` |
 
-### Professor
-
-| ID | Priority | User Story | Subtasks |
-|---|---|---|---|
-| US-23 | High | As a professor, I can generate a full course structure from an uploaded PDF | T-3.13: "Generate from PDF" button · T-3.14: POST /ai/generate-course · T-3.15: PDF parsing + Gemini structuring |
-| US-24 | High | As a professor, I can review and edit the AI-generated course structure before saving | T-3.16: Preview/edit wizard UI · T-3.17: Confirm & save to DB |
-| US-25 | Medium | As a professor, I can trigger AI generation of a quiz for any subsection | T-3.18: Generate quiz button · T-3.19: POST /ai/generate-qcm · T-3.20: Save questions to DB |
-
-### System
+### Professor — PDF → Course
 
 | ID | Priority | User Story | Subtasks |
 |---|---|---|---|
-| US-26 | High | As the system, course materials are chunked, embedded, and indexed in Pinecone when uploaded | T-3.21: Sentence-aware chunker (1500 char target) · T-3.22: embedding-001 vectorisation · T-3.23: Pinecone upsert |
-| US-27 | High | As the system, RAG queries retrieve only chunks above MIN_SCORE=0.40 | T-3.24: Cosine similarity filter · T-3.25: Top-k retrieval · T-3.26: Inject context into Gemini prompt |
+| US-3.7 | High | As a professor, I can upload a PDF (≤20 MB) and the system extracts text + generates a course skeleton in the background | T-3.7.1: `POST /api/course-gen/upload` (BackgroundTasks) · T-3.7.2: `utils/pdf_parser` + `utils/course_generator` · T-3.7.3: `GeneratedCourse` job row |
+| US-3.8 | High | As a professor, I can poll the generation job to see status (`processing`/`completed`/`failed`) | T-3.8.1: `GET /api/course-gen/{job_id}` · T-3.8.2: Owner-only access guard |
+| US-3.9 | Medium | As a professor, I can regenerate a single subsection at a different difficulty | T-3.9.1: `POST …/{job_id}/sections/{s}/subsections/{ss}/regenerate` · T-3.9.2: `_content_prompt()` polish-only mode |
+| US-3.10 | High | As a professor, I can import the generated job into an existing course, creating real sections + subsections + text blocks | T-3.10.1: `POST /api/course-gen/{job_id}/import/{course_id}` · T-3.10.2: Append after existing `order_index` · T-3.10.3: Synchronous `index_course_sync()` after import |
+| US-3.11 | Medium | As a professor, I can request a preview quiz for any generated subsection | T-3.11.1: `POST …/{job_id}/sections/{s}/subsections/{ss}/quiz` · T-3.11.2: `generate_quiz()` |
+
+### System — RAG Pipeline
+
+| ID | Priority | User Story | Subtasks |
+|---|---|---|---|
+| US-3.12 | High | As the system, when a course is published or a text block changes, content is re-chunked and upserted to Pinecone | T-3.12.1: `_chunk_text()` sentence-aware (target 1500 chars, max 2500, min 200) · T-3.12.2: `EMBED_DIM=768` Gemini embedding · T-3.12.3: `UPSERT_BATCH=100` to Pinecone |
+| US-3.13 | High | As the system, AI summary generation results are deduplicated via an in-process TTL cache | T-3.13.1: `_TTLCache(max=256, ttl=6h)` · T-3.13.2: Hash-keyed by input payload |
+| US-3.14 | Medium | As a professor, I can manually trigger reindex for a course | T-3.14.1: `POST /api/ai/reindex/{course_id}` · T-3.14.2: `GET /api/ai/index-status/{course_id}` |
 
 ---
 
 ## Related Diagrams
 
-### C4 Component View — AI Learning Domain
+### C4 Component View — AI Domain
 
 ```mermaid
 graph TD
-    A["React Frontend\nTypeScript + Vite"] -->|REST| B["ai_routes.py\nRAG chat · QCM · PDF endpoints"]
-    B --> C["ai_controller.py\nOrchestrates RAG pipeline\nPDF parsing · quiz generation"]
-    C --> D["utils/rag.py\nSentence-aware chunking\nPinecone upsert · query"]
-    C --> E["utils/gemini.py\nGemini 3.1 Flash Lite\nTTL cache 6h · 256 entries"]
-    C --> F["Data Access\nSQLAlchemy · Course · GeneratedCourse"]
-    F -->|SQL| G[("Neon PostgreSQL")]
-    D -->|Vectors| H[["Pinecone\nVector DB"]]
-    E -->|API call| I[["Google Gemini API"]]
+    A["React Frontend<br/>(AI Tutor panel · QCM · PDF Wizard)"] -->|REST| B["ai_routes.py<br/>chat · qcm · course-summary"]
+    A -->|REST| C["course_generation_routes.py<br/>upload · poll · regenerate · import"]
+    B --> D["qcm_controller.py<br/>generate · submit · history"]
+    B --> E["utils/rag.py<br/>search_course · index_course_*<br/>chunk · embed · upsert"]
+    B --> F["utils/gemini.py<br/>chat_with_context<br/>generate_course_summary<br/>TTL cache"]
+    C --> G["course_generation_controller.py<br/>create_job · run_pipeline"]
+    G --> H["utils/pdf_parser.py<br/>PyMuPDF text extraction"]
+    G --> I["utils/course_generator.py<br/>Gemini prompts<br/>(skeleton + content + quiz)"]
+    D --> J["Data Access<br/>SQLAlchemy ORM"]
+    G --> J
+    J -->|SQL| K[("Neon PostgreSQL<br/>qcm_attempts · generated_courses")]
+    E -->|vectors| L[("Pinecone<br/>hub4learners index")]
+    F -.->|LLM call| M[["Google Gemini<br/>gemini-3.1-flash-lite"]]
+    E -.->|embeddings| M
+    I -.->|LLM call| M
 ```
 
-### Class Diagram — AI Models
+### Class Diagram — AI Persistence
 
 ```mermaid
 classDiagram
     class GeneratedCourse {
-        +int id
-        +int professor_id
-        +str title
-        +json structure
-        +str source_pdf
-        +datetime generated_at
-    }
-
-    class ChatRequest {
-        +int id
-        +int user_id
-        +int subsection_id
-        +str question
-        +str answer
-        +float score
+        +UUID id
+        +UUID user_id
+        +str pdf_filename
+        +str status
+        +str difficulty
+        +JSONB result
+        +str error
         +datetime created_at
+        +datetime updated_at
     }
 
-    class QCMQuestion {
-        +int id
-        +int subsection_id
-        +str question
-        +list options
-        +int correct_index
-        +str explanation
+    class QCMAttempt {
+        +UUID id
+        +UUID student_id
+        +UUID course_id
+        +UUID section_id
+        +str difficulty
+        +int score
+        +int total
+        +bool passed
+        +str questions_json
+        +str answers_json
+        +datetime completed_at
     }
 
-    GeneratedCourse "*" --> "1" User
-    ChatRequest "*" --> "1" User
-    ChatRequest "*" --> "1" CourseSubsection
-    QCMQuestion "*" --> "1" CourseSubsection
+    class Course {
+        +str ai_summary
+        +datetime ai_summary_generated_at
+    }
+
+    GeneratedCourse "*" --> "1" User : professor
+    QCMAttempt "*" --> "1" User : student
+    QCMAttempt "*" --> "1" Course
+    QCMAttempt "*" --> "0..1" CourseSection
 ```
 
-### Sequence Diagram — RAG Chat Flow
+### Sequence Diagram — AI Tutor RAG Chat
 
 ```mermaid
 sequenceDiagram
     actor Student
     participant Frontend
     participant FastAPI
+    participant RAG as utils/rag.py
+    participant Gemini as utils/gemini.py
     participant Pinecone
-    participant Gemini
+    participant DB as Neon PostgreSQL
 
-    Student->>Frontend: Type question in AI Tutor panel
-    Frontend->>FastAPI: POST /ai/chat { question, subsection_id }
-    FastAPI->>FastAPI: Embed question (embedding-001)
-    FastAPI->>Pinecone: Query top-k vectors (MIN_SCORE=0.40)
-    Pinecone-->>FastAPI: Relevant content chunks
-    FastAPI->>Gemini: Prompt = context chunks + question
-    Gemini-->>FastAPI: Grounded answer
-    FastAPI->>Neon PostgreSQL: Save ChatRequest record
-    FastAPI-->>Frontend: { answer }
-    Frontend-->>Student: Display answer in tutor panel
+    Student->>Frontend: Ask question in tutor panel
+    Frontend->>FastAPI: POST /api/ai/chat { course_id, message, history }
+    FastAPI->>DB: SELECT course
+    DB-->>FastAPI: course row
+    FastAPI->>RAG: search_course(course_id, message)
+    RAG->>Gemini: embed query (768-dim)
+    Gemini-->>RAG: embedding vector
+    RAG->>Pinecone: query namespace=course_id, topK, filter score≥0.40
+    Pinecone-->>RAG: matched chunks
+    alt no chunks AND course has DB text
+        FastAPI->>RAG: index_course_bg(course_id) (self-heal)
+    end
+    FastAPI->>Gemini: chat_with_context(title, chunks, history, message)
+    Gemini-->>FastAPI: grounded reply
+    FastAPI-->>Frontend: { reply }
 ```
 
-### Sequence Diagram — PDF Course Generation
+### Sequence Diagram — PDF → Course Generation & Import
 
 ```mermaid
 sequenceDiagram
     actor Professor
     participant Frontend
     participant FastAPI
+    participant CGenCtrl as course_generation_controller
+    participant PDF as utils/pdf_parser
+    participant Generator as utils/course_generator
     participant Gemini
-    participant Neon PostgreSQL
+    participant RAG as utils/rag
+    participant DB as Neon PostgreSQL
+    participant Pinecone
 
-    Professor->>Frontend: Upload PDF + click Generate
-    Frontend->>FastAPI: POST /ai/generate-course (multipart)
-    FastAPI->>FastAPI: Parse PDF · extract text chunks
-    FastAPI->>Gemini: Prompt: generate course structure from text
-    Gemini-->>FastAPI: JSON structure (sections + subsections)
-    FastAPI-->>Frontend: Preview course structure
-    Professor->>Frontend: Review and confirm
-    Frontend->>FastAPI: POST /courses (confirmed structure)
-    FastAPI->>Neon PostgreSQL: INSERT Course + Sections + Subsections
-    Neon PostgreSQL-->>FastAPI: records
-    FastAPI-->>Frontend: Course created
-    Frontend-->>Professor: Redirect to course editor
+    Professor->>Frontend: Upload PDF + difficulty
+    Frontend->>FastAPI: POST /api/course-gen/upload (≤20 MB)
+    FastAPI->>CGenCtrl: create_job()
+    CGenCtrl->>DB: INSERT GeneratedCourse(status='processing')
+    FastAPI-->>Frontend: 202 { job_id }
+
+    Note over CGenCtrl,Gemini: BackgroundTasks
+    CGenCtrl->>PDF: extract text
+    CGenCtrl->>Generator: skeleton prompt → Gemini
+    Generator->>Gemini: section/subsection plan
+    Gemini-->>Generator: JSON plan
+    Generator->>Gemini: per-subsection content
+    Gemini-->>Generator: HTML lessons
+    CGenCtrl->>DB: UPDATE job(status='completed', result=JSON)
+
+    Professor->>Frontend: Review draft + click Import
+    Frontend->>FastAPI: POST /api/course-gen/{job_id}/import/{course_id}
+    FastAPI->>DB: INSERT CourseSection + CourseSubsection + LessonBlock
+    FastAPI->>RAG: index_course_sync(course_id)
+    RAG->>Pinecone: upsert chunk vectors
+    FastAPI-->>Frontend: { sections_created, lessons_created, indexed_chunks }
+```
+
+### Sequence Diagram — QCM Generation, Submission & XP
+
+```mermaid
+sequenceDiagram
+    actor Student
+    participant Frontend
+    participant FastAPI
+    participant QCMCtrl as qcm_controller
+    participant Gemini
+    participant XP as xp_service
+    participant DB as Neon PostgreSQL
+
+    Student->>Frontend: Pick section + difficulty
+    Frontend->>FastAPI: POST /api/ai/qcm/generate
+    FastAPI->>QCMCtrl: generate_qcm(course_id, section_id, difficulty)
+    QCMCtrl->>DB: Load section content
+    QCMCtrl->>Gemini: prompt → MCQ JSON
+    Gemini-->>QCMCtrl: questions[]
+    QCMCtrl-->>Frontend: QCMGenerateOut
+
+    Student->>Frontend: Submit answers
+    Frontend->>FastAPI: POST /api/ai/qcm/submit
+    FastAPI->>QCMCtrl: submit_qcm()
+    QCMCtrl->>QCMCtrl: score = sum(correct) ; passed = score/total ≥ 70%
+    QCMCtrl->>DB: INSERT QCMAttempt(questions_json, answers_json, passed)
+    alt passed
+        FastAPI->>XP: award_xp("quiz_pass", source_id=attempt_id)
+        opt 100% score
+            FastAPI->>XP: award_xp("quiz_perfect_bonus")
+        end
+    end
+    FastAPI-->>Frontend: QCMSubmitOut
 ```
 
 ---
 
 ## Conclusion
 
-Sprint 3 elevated Hub4Learners from a content delivery platform to an intelligent learning environment. The RAG pipeline, built on Pinecone vector search and Google Gemini generation, ensures AI answers are accurate and course-scoped. The PDF-to-course generator significantly reduces professor onboarding time, and knowledge checks provide immediate feedback loops for students. The TTL caching layer on Gemini calls ensures performance remains consistent under load.
+Sprint 3 establishes the AI backbone of Hub4Learners. RAG retrieval is grounded — the tutor genuinely answers from the course's own text, not the model's training data — and the indexing pipeline is wired into the natural lifecycle events (text edit, publish, AI import) so professors never have to think about "making the AI ready." The PDF generator removes the highest-effort step of building a course, and the QCM loop closes the cycle by giving students automatic, content-aware assessment with XP rewards plugged into the gamification system from Sprint 4.

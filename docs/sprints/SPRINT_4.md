@@ -1,165 +1,218 @@
-# Sprint 4 — Gamification & Social
-**Weeks 7–8 | Story Points: 38**
+# Sprint 4 — Gamification & Engagement
+
+**Weeks 7–8**
 
 ## Introduction
 
-Sprint 4 introduces the gamification engine and social features that drive long-term student engagement. Students earn XP for learning activities, level up, maintain daily streaks, unlock achievements and badges, and compete on leaderboards. A friend system allows users to connect with peers and follow each other's progress.
+Sprint 4 adds the engagement engine on top of the learning loop built in Sprints 2–3. Every meaningful action — completing a lesson, passing a quiz, publishing a course, having a student finish your course, receiving a 5-star rating — flows through a single `award_xp()` choke point with anti-cheat guards (one-shot artifacts, cooldown windows, a 5 000-XP daily cap). XP feeds level progression, learning streaks, an achievement catalog, an unlockable/equippable badge collection, and three leaderboards (XP, streak, courses).
 
 ## Sprint Goal
 
-> Make learning intrinsically motivating by rewarding students with XP, levels, streaks, badges, and achievements, while enabling social connections through a friend system and leaderboards.
+> Reward both learners and professors for real, verifiable activity through XP, levels, streaks, achievements, badges, and leaderboards — backed by a tamper-resistant grant pipeline.
 
 ---
 
 ## User Stories
 
-### Gamification
+### Student & Professor — Earning XP
 
 | ID | Priority | User Story | Subtasks |
 |---|---|---|---|
-| US-28 | High | As a student, I earn XP for completing lessons, logging in daily, finishing courses, and other learning activities | T-4.1: award_xp() service · T-4.2: XP_REWARDS dict · T-4.3: DAILY_XP_CAP=5000 · T-4.4: Anti-cheat via source_id |
-| US-29 | High | As a student, my XP accumulates and determines my level on the platform | T-4.5: Level thresholds · T-4.6: Level-up detection · T-4.7: Display level badge in profile |
-| US-30 | High | As a student, I maintain a daily login streak that resets if I miss a day | T-4.8: Streak tracking logic · T-4.9: Streak display in dashboard · T-4.10: Streak freeze item |
-| US-31 | Medium | As a student, I can view my XP history and activity log | T-4.11: XPLog model · T-4.12: GET /gamification/xp-log · T-4.13: Activity timeline UI |
-| US-32 | Medium | As a student, I unlock achievements based on milestones (first course, 7-day streak, etc.) | T-4.14: Achievement triggers · T-4.15: Achievement unlock notification · T-4.16: Achievement list UI |
-| US-33 | Medium | As a student, I collect badges awarded for specific accomplishments | T-4.17: Badge model · T-4.18: Badge award logic · T-4.19: Badge shelf in profile |
-| US-34 | Medium | As a student, I can view a leaderboard ranking students by XP within my university | T-4.20: GET /gamification/leaderboard · T-4.21: Leaderboard UI with rank, avatar, XP |
+| US-4.1 | High | As a learner, I earn XP for completing a lesson (25), passing a quiz (50, +25 perfect), completing a course (250), and watching a video (15) | T-4.1.1: `XP_REWARDS` map in `xp_service.py` · T-4.1.2: `ONE_SHOT_SOURCES` set · T-4.1.3: `source_id` keys per artifact |
+| US-4.2 | High | As a learner, I can claim daily-login XP once per UTC day | T-4.2.1: `POST /api/gamification/daily-login` · T-4.2.2: `source_id = login-{user}-{YYYY-MM-DD}` · T-4.2.3: 12-hour cooldown |
+| US-4.3 | High | As a professor, I earn XP when I publish a course (150), when a student enrolls (15), completes (100), or rates (25 + 40 bonus on 5⭐) | T-4.3.1: Professor entries in `XP_REWARDS` · T-4.3.2: Composite `source_id` like `{course_id}:{student_id}` |
+| US-4.4 | High | As the system, the same artifact cannot grant XP twice and source-type cooldowns block automation | T-4.4.1: `ONE_SHOT_SOURCES` exact-match check · T-4.4.2: `COOLDOWN_SECONDS` window query on `XPLog` · T-4.4.3: `DAILY_XP_CAP=5000` daily ceiling |
 
-### Social
+### Levels, Streaks, Achievements & Badges
 
 | ID | Priority | User Story | Subtasks |
 |---|---|---|---|
-| US-35 | Medium | As a student, I can send and accept friend requests | T-4.22: Friend request model · T-4.23: POST /friends/request · T-4.24: PATCH /friends/{id}/accept |
-| US-36 | Low | As a student, I can view my friends list and their learning stats | T-4.25: Friends list UI · T-4.26: GET /friends/me · T-4.27: Display friend XP and level |
-| US-37 | Low | As a student, I can find other students by name or university | T-4.28: Find Friends page · T-4.29: GET /users/search · T-4.30: Send request from results |
+| US-4.5 | High | As a learner, my XP total drives my level via `calculate_level_from_xp()` and the UI shows progress to the next level | T-4.5.1: `utils/leveling.py` curve · T-4.5.2: `UserGamification.level` recomputed on every award · T-4.5.3: Level-up returned in `XPGainOut` |
+| US-4.6 | High | As a learner, my current and longest learning streaks update when I complete a lesson on a new UTC day | T-4.6.1: `last_activity_date` comparison · T-4.6.2: Increment `current_streak` if consecutive, reset otherwise · T-4.6.3: Bump `longest_streak` |
+| US-4.7 | Medium | As a learner, I unlock seeded achievements when I cross their thresholds, and the UI marks them as "unseen" until I view them | T-4.7.1: `Achievement` catalog seeded on startup · T-4.7.2: `UserAchievement(seen=false)` · T-4.7.3: `POST /api/gamification/achievements/seen` |
+| US-4.8 | Medium | As a learner, I can browse my badge collection and equip one as my profile flair | T-4.8.1: `GET /api/gamification/badges` · T-4.8.2: `POST /api/gamification/badges/equip` · T-4.8.3: `UserGamification.equipped_badge_id` |
+| US-4.9 | High | As a learner, I can view three leaderboards (XP, streak, courses) with daily / weekly / all-time periods | T-4.9.1: `GET /api/gamification/leaderboard?metric=&period=` · T-4.9.2: Pagination (`page`, `page_size`) · T-4.9.3: Highlight "me" row |
+| US-4.10 | Medium | As a learner, I can see my full XP grant history | T-4.10.1: `GET /api/gamification/xp/logs?limit=…` · T-4.10.2: Activity feed UI |
+| US-4.11 | Medium | As a learner, I can view another user's public gamification profile | T-4.11.1: `GET /api/gamification/profile/{user_id}` · T-4.11.2: Total XP · level · streak · equipped badge |
+
+### Social Graph
+
+| ID | Priority | User Story | Subtasks |
+|---|---|---|---|
+| US-4.12 | High | As a user, I can search for other users by name | T-4.12.1: `GET /api/friends/search?q=` · T-4.12.2: Exclude self + existing friends |
+| US-4.13 | High | As a user, I can send, accept, decline, and cancel friend requests | T-4.13.1: `POST /api/friends/request` · T-4.13.2: `PUT …/{id}/review` · T-4.13.3: `Friendship.status` lifecycle |
+| US-4.14 | Medium | As a user, I can list my accepted friends and unfriend someone | T-4.14.1: `GET /api/friends/list` · T-4.14.2: `DELETE /api/friends/{friendship_id}` |
 
 ---
 
 ## Related Diagrams
 
-### C4 Component View — Gamification Domain
+### C4 Component View — Gamification & Social Domain
 
 ```mermaid
 graph TD
-    A["React Frontend\nTypeScript + Vite"] -->|REST| B["gamification_routes.py\nXP · Achievements · Badges · Leaderboard"]
-    B --> C["gamification_controller.py\nOrchestrates XP awards and milestone checks"]
-    C --> D["xp_service.py\naward_xp() · XP_REWARDS\nDAILY_XP_CAP · anti-cheat"]
-    C --> E["achievement_service.py\nMilestone triggers · unlock logic"]
-    C --> F["Data Access\nSQLAlchemy · Gamification models"]
-    F -->|SQL| G[("Neon PostgreSQL")]
+    A["React Frontend<br/>(Hero Stats · Leaderboard · Friends)"] -->|REST| B["gamification_routes.py<br/>/api/gamification/*"]
+    A -->|REST| C["friend_routes.py<br/>/api/friends/*"]
+    B --> D["xp_service.py<br/>award_xp · cooldowns · one-shot · daily cap"]
+    B --> E["achievements_service.py<br/>list_for_user · mark_seen · unlock check"]
+    B --> F["badges_service.py<br/>list_for_user · equip"]
+    B --> G["leaderboard_service.py<br/>xp · streak · courses · daily/weekly/all"]
+    B --> H["profile_service.py<br/>aggregate UserGamification"]
+    C --> I["friend_controller.py<br/>search · request · review · list · unfriend"]
+    D --> J["utils/leveling.py<br/>calculate_level_from_xp"]
+    D --> K["Data Access<br/>SQLAlchemy ORM"]
+    E --> K
+    F --> K
+    G --> K
+    I --> K
+    K -->|SQL| L[("Neon PostgreSQL")]
 ```
 
-### Class Diagram — Gamification Models
+### Class Diagram — Gamification & Social Entities
 
 ```mermaid
 classDiagram
     class UserGamification {
-        +int id
-        +int user_id
+        +UUID user_id
         +int total_xp
         +int level
-        +int streak_days
+        +int current_streak
+        +int longest_streak
         +date last_activity_date
+        +date streak_freeze_used_on
+        +UUID equipped_badge_id
         +datetime updated_at
     }
 
     class XPLog {
-        +int id
-        +int user_id
-        +int xp_awarded
-        +str source
+        +UUID id
+        +UUID user_id
+        +int amount
+        +str source_type
         +str source_id
-        +datetime awarded_at
-    }
-
-    class Achievement {
-        +int id
-        +str name
         +str description
-        +str icon
-        +str trigger_type
-        +int threshold
-    }
-
-    class Badge {
-        +int id
-        +int user_id
-        +str badge_type
-        +str label
-        +datetime earned_at
-    }
-
-    class Friendship {
-        +int id
-        +int requester_id
-        +int receiver_id
-        +str status
         +datetime created_at
     }
 
+    class Achievement {
+        +UUID id
+        +str code
+        +str title
+        +str description
+        +str icon
+        +int xp_reward
+        +str category
+    }
+
+    class UserAchievement {
+        +UUID id
+        +UUID user_id
+        +UUID achievement_id
+        +datetime unlocked_at
+        +bool seen
+    }
+
+    class Badge {
+        +UUID id
+        +str code
+        +str title
+        +str description
+        +str icon
+        +str rarity
+    }
+
+    class UserBadge {
+        +UUID id
+        +UUID user_id
+        +UUID badge_id
+        +datetime unlocked_at
+    }
+
+    class Friendship {
+        +UUID id
+        +UUID requester_id
+        +UUID requestee_id
+        +str status
+        +datetime created_at
+        +datetime reviewed_at
+    }
+
     UserGamification "1" --> "1" User
+    UserGamification "*" --> "0..1" Badge : equipped
     XPLog "*" --> "1" User
-    Badge "*" --> "1" User
-    Friendship "*" --> "1" User
+    UserAchievement "*" --> "1" User
+    UserAchievement "*" --> "1" Achievement
+    UserBadge "*" --> "1" User
+    UserBadge "*" --> "1" Badge
+    Friendship "*" --> "1" User : requester
+    Friendship "*" --> "1" User : requestee
 ```
 
-### Sequence Diagram — XP Award Flow
+### Sequence Diagram — `award_xp()` with Anti-Cheat
 
 ```mermaid
 sequenceDiagram
-    actor Student
-    participant Frontend
-    participant FastAPI
-    participant xp_service
-    participant Neon PostgreSQL
+    participant Caller as Triggering route<br/>(progress / quiz / publish / …)
+    participant XP as xp_service.award_xp
+    participant DB as Neon PostgreSQL
+    participant Leveling as utils/leveling
 
-    Student->>Frontend: Complete a subsection
-    Frontend->>FastAPI: POST /progress/{subsection_id}
-    FastAPI->>xp_service: award_xp(user_id, source="lesson_complete", source_id)
-    xp_service->>Neon PostgreSQL: Check existing XPLog (anti-cheat)
-    Neon PostgreSQL-->>xp_service: no duplicate found
-    xp_service->>Neon PostgreSQL: INSERT XPLog
-    xp_service->>Neon PostgreSQL: UPDATE UserGamification total_xp
-    xp_service->>xp_service: Check level threshold → level up?
-    xp_service->>xp_service: Check streak update
-    xp_service->>xp_service: Check achievement triggers
-    Neon PostgreSQL-->>xp_service: updated record
-    FastAPI-->>Frontend: { xp_awarded, new_total, level_up, achievements }
-    Frontend-->>Student: XP toast + level-up animation
+    Caller->>XP: award_xp(user, source_type, source_id, amount?)
+    XP->>DB: SELECT or INSERT UserGamification
+    XP->>DB: SUM xp gained today
+    alt today_xp + amount > DAILY_XP_CAP
+        XP-->>Caller: amount clipped / rejected
+    end
+    alt source_type ∈ ONE_SHOT_SOURCES
+        XP->>DB: SELECT XPLog WHERE user_id, source_type, source_id
+        alt exists
+            XP-->>Caller: skip (already granted)
+        end
+    end
+    alt source_type ∈ COOLDOWN_SECONDS
+        XP->>DB: SELECT latest XPLog within window
+        alt within cooldown
+            XP-->>Caller: skip
+        end
+    end
+    XP->>DB: INSERT XPLog(amount, source_type, source_id)
+    XP->>DB: UPDATE UserGamification.total_xp
+    XP->>Leveling: calculate_level_from_xp(total)
+    Leveling-->>XP: new level
+    XP->>DB: UPDATE UserGamification.level
+    XP->>XP: update streak, check achievements + badges
+    XP-->>Caller: XPGainOut(amount, new_total, level_up, unlocked)
 ```
 
-### Sequence Diagram — Friend Request Flow
+### Sequence Diagram — Friend Request Lifecycle
 
 ```mermaid
 sequenceDiagram
-    actor StudentA
-    actor StudentB
+    actor UserA
+    actor UserB
     participant Frontend
     participant FastAPI
-    participant Neon PostgreSQL
+    participant FriendCtrl as friend_controller
+    participant Notif as notification_controller
+    participant DB as Neon PostgreSQL
 
-    StudentA->>Frontend: Search for StudentB on Find Friends
-    Frontend->>FastAPI: GET /users/search?q=name
-    FastAPI-->>Frontend: user list
-    StudentA->>Frontend: Click Send Request
-    Frontend->>FastAPI: POST /friends/request { receiver_id }
-    FastAPI->>Neon PostgreSQL: INSERT Friendship (status=pending)
-    Neon PostgreSQL-->>FastAPI: friendship record
-    FastAPI-->>Frontend: 201 Request sent
+    UserA->>Frontend: Search + Send request
+    Frontend->>FastAPI: POST /api/friends/request
+    FastAPI->>FriendCtrl: send_friend_request
+    FriendCtrl->>DB: INSERT Friendship(status='pending')
+    FastAPI->>Notif: push("Friend Request", to=UserB)
+    FastAPI-->>Frontend: FriendRequestOut
 
-    StudentB->>Frontend: View friend requests
-    Frontend->>FastAPI: GET /friends/requests
-    FastAPI-->>Frontend: pending requests list
-    StudentB->>Frontend: Accept request
-    Frontend->>FastAPI: PATCH /friends/{id}/accept
-    FastAPI->>Neon PostgreSQL: UPDATE Friendship status=accepted
-    Neon PostgreSQL-->>FastAPI: updated
-    FastAPI-->>Frontend: 200 OK
-    Frontend-->>StudentB: Friends list updated
+    UserB->>Frontend: Review request (accept)
+    Frontend->>FastAPI: PUT /api/friends/requests/{id}/review
+    FastAPI->>FriendCtrl: review_friend_request(action="accept")
+    FriendCtrl->>DB: UPDATE Friendship.status='accepted', reviewed_at=now
+    FastAPI->>Notif: push("Friend Request Accepted", to=UserA)
+    FastAPI-->>Frontend: FriendRequestOut
 ```
 
 ---
 
 ## Conclusion
 
-Sprint 4 transformed Hub4Learners from a course platform into a motivating learning ecosystem. The XP engine with daily caps and anti-cheat source tracking ensures fair progression, while achievements and badges create memorable milestones. The leaderboard and friend system introduce a social dimension that encourages peer accountability. Together, these features significantly increase daily active usage and course completion rates.
+Sprint 4 closes the engagement loop. Every learner and professor action funnels through a single `award_xp()` function whose anti-cheat behaviour (one-shot per artifact, cooldown windows, daily cap, full audit log in `xp_logs`) makes XP — and therefore levels, streaks, leaderboards, and unlocks — trustworthy. The friend graph built alongside is the social substrate that Sprint 5's direct-messaging and discussion features will sit on top of.
