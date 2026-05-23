@@ -1,38 +1,29 @@
-# Sprint 1 — Authentication & User Management
+# Sprint 1 — Authentication
 
 **Weeks 1–2**
 
 ## Introduction
 
-The first sprint of Hub4Learners focuses on establishing the platform's identity layer. It delivers user registration, login, profile management, and the four-tier role model (student, professor, university admin, super admin) that every subsequent feature relies on. The sprint also lays down the organisational hierarchy — Regions, Universities, and the professor-to-university join request flow.
+The first sprint focuses on the foundation of Hub4Learners: a secure way for users to create an account, log in, and stay authenticated across the platform. It establishes the JWT-based session model and the role field on the user record that every later sprint relies on for access control.
 
 ## Sprint Goal
 
-> Provide a secure, role-aware authentication system that lets users register, log in, manage their profile, and be properly scoped to their university.
+> Deliver a working sign-up and sign-in flow with role-aware JWT sessions that the rest of the platform can build on.
 
 ---
 
 ## User Stories
 
-### Visitor & Registered User
-
 | ID | Priority | Story | Subtasks |
 |---|---|---|---|
-| US-1.1 | High | As a visitor, I can register with my name, email, password and chosen role (student or professor) | T-1.1.1: Build register form · T-1.1.2: Hash password with bcrypt · T-1.1.3: Issue JWT on success |
-| US-1.2 | High | As a registered user, I can log in with my email and password to receive a session token | T-1.2.1: Login form · T-1.2.2: Verify credentials · T-1.2.3: Store token in localStorage |
-| US-1.3 | High | As a logged-in user, I can fetch my own profile through a `/me` endpoint | T-1.3.1: JWT decode middleware · T-1.3.2: Return user data |
-| US-1.4 | Medium | As a user, I can update my profile (name, bio, speciality, profile image, password) | T-1.4.1: Profile edit form · T-1.4.2: Profile image upload |
-| US-1.5 | Medium | As a user, I can configure my preferences (theme, notifications, privacy) in a settings modal | T-1.5.1: Settings modal UI · T-1.5.2: Persist preferences locally |
-| US-1.6 | Medium | As a user, I can log out and have my session cleared | T-1.6.1: Clear token · T-1.6.2: Redirect to login |
-
-### Organisation & Roles
-
-| ID | Priority | Story | Subtasks |
-|---|---|---|---|
-| US-1.7 | High | As a super admin, I can manage Regions and Universities | T-1.7.1: CRUD endpoints · T-1.7.2: Admin panel UI |
-| US-1.8 | High | As a super admin, I can promote a user to university admin | T-1.8.1: Role change endpoint · T-1.8.2: User management table |
-| US-1.9 | Medium | As a professor, I can request to join a university | T-1.9.1: Join request form · T-1.9.2: Persist request |
-| US-1.10 | Medium | As a university admin, I can approve or reject professor join requests | T-1.10.1: Review endpoint · T-1.10.2: Pending requests UI |
+| US-1.1 | High | As a visitor, I can register an account with first name, last name, email and password | T-1.1.1: Build register form · T-1.1.2: Validate inputs · T-1.1.3: Reject duplicate emails |
+| US-1.2 | High | As a visitor, I can choose my role at registration (student or professor) | T-1.2.1: Role selector in form · T-1.2.2: Default to student |
+| US-1.3 | High | As the system, I hash every password with bcrypt before storing it | T-1.3.1: Integrate passlib · T-1.3.2: Never persist plaintext |
+| US-1.4 | High | As a registered user, I can log in with my email and password | T-1.4.1: Build login form · T-1.4.2: Verify credentials |
+| US-1.5 | High | As the system, I issue a signed JWT on successful login containing the user's id and role | T-1.5.1: Create token util · T-1.5.2: 60-minute expiry |
+| US-1.6 | High | As a logged-in user, I can fetch my own profile through a `/me` endpoint | T-1.6.1: JWT decoding · T-1.6.2: Return user payload |
+| US-1.7 | Medium | As a logged-in user, I can log out and have my session cleared | T-1.7.1: Clear token · T-1.7.2: Redirect to login |
+| US-1.8 | Medium | As the system, I reject invalid or expired tokens with a clear error | T-1.8.1: Auth middleware · T-1.8.2: 401 response |
 
 ---
 
@@ -42,17 +33,15 @@ The first sprint of Hub4Learners focuses on establishing the platform's identity
 
 ```mermaid
 graph TD
-    A["React Frontend<br/>(Auth pages + AuthContext)"] -->|REST| B["auth_routes.py<br/>Register · Login · Profile"]
-    A -->|REST| C["org_routes.py<br/>Regions · Universities · Join Requests"]
-    B --> D["auth_controller.py<br/>Validation · password hashing"]
-    C --> E["org_controller.py<br/>Hierarchy management"]
-    D --> F["utils/security.py<br/>JWT · bcrypt · role guards"]
-    D --> G["SQLAlchemy ORM"]
-    E --> G
-    G -->|SQL| H[(Neon PostgreSQL)]
+    A["React Frontend<br/>(Login & Register pages)"] -->|REST| B["auth_routes.py<br/>Register · Login · Me"]
+    B --> C["auth_controller.py<br/>Validation · token issuance"]
+    C --> D["utils/security.py<br/>JWT (HS256) · bcrypt"]
+    C --> E["SQLAlchemy ORM"]
+    E -->|SQL| F[(Neon PostgreSQL)]
+    A -. AuthContext .- A
 ```
 
-### Class Diagram — Identity & Organisation
+### Class Diagram — User Identity
 
 ```mermaid
 classDiagram
@@ -62,74 +51,59 @@ classDiagram
         string email
         string password_hash
         string role
-        string bio
-        string speciality
-        string profile_image
-        UUID university_id
-        UUID region_id
+        bool is_active
+        bool is_verified
+        datetime created_at
     }
 
-    class Region {
-        UUID id
-        string name
-        string code
+    class TokenResponse {
+        string access_token
+        string token_type
     }
 
-    class University {
-        UUID id
-        string name
-        UUID region_id
-    }
-
-    class UniversityJoinRequest {
-        UUID id
-        UUID professor_id
-        UUID university_id
-        string status
-        datetime reviewed_at
-    }
-
-    User "*" --> "0..1" University
-    User "*" --> "0..1" Region
-    University "*" --> "1" Region
-    UniversityJoinRequest "*" --> "1" User
-    UniversityJoinRequest "*" --> "1" University
+    User ..> TokenResponse : issued on login
 ```
 
-### Use Case Diagram — Authentication & Organisation
+### Use Case Diagram — Authentication
 
 ```mermaid
 graph LR
     V((Visitor))
     U((User))
-    P((Professor))
-    UA((University Admin))
-    SA((Super Admin))
 
     UC1([Register])
-    UC2([Login])
-    UC3([View Profile])
-    UC4([Update Profile])
-    UC5([Configure Settings])
-    UC6([Logout])
-    UC7([Submit Join Request])
-    UC8([Review Join Requests])
-    UC9([Manage Regions & Universities])
-    UC10([Change User Role])
+    UC2([Choose Role])
+    UC3([Login])
+    UC4([View My Profile])
+    UC5([Logout])
 
     V --> UC1
     V --> UC2
-    U --> UC3
+    V --> UC3
     U --> UC4
     U --> UC5
-    U --> UC6
-    P --> UC7
-    UA --> UC8
-    SA --> UC9
-    SA --> UC10
 ```
 
-### Sequence Diagram — Registration & Login
+### Sequence Diagram — Registration
+
+```mermaid
+sequenceDiagram
+    actor Visitor
+    participant Frontend
+    participant API as FastAPI
+    participant DB as Neon PostgreSQL
+
+    Visitor->>Frontend: Fill register form
+    Frontend->>API: POST /auth/register
+    API->>DB: Check email uniqueness
+    API->>API: Hash password (bcrypt)
+    API->>DB: Insert user (role=student|professor)
+    API-->>Frontend: JWT access_token
+    Frontend->>Frontend: Save token in localStorage
+    Frontend-->>Visitor: Redirect to dashboard
+```
+
+### Sequence Diagram — Login & Token Validation
 
 ```mermaid
 sequenceDiagram
@@ -138,41 +112,21 @@ sequenceDiagram
     participant API as FastAPI
     participant DB as Neon PostgreSQL
 
-    User->>Frontend: Fill register form
-    Frontend->>API: POST /auth/register
-    API->>API: Hash password (bcrypt)
-    API->>DB: Insert user
-    API-->>Frontend: JWT token
-    Frontend->>Frontend: Save token in localStorage
-
-    User->>Frontend: Login
+    User->>Frontend: Submit credentials
     Frontend->>API: POST /auth/login
-    API->>DB: Verify credentials
-    API-->>Frontend: JWT token + user payload
-```
+    API->>DB: Fetch user by email
+    API->>API: Verify password (bcrypt)
+    API->>API: Sign JWT (sub, role)
+    API-->>Frontend: access_token
 
-### Sequence Diagram — Professor Join Request Flow
-
-```mermaid
-sequenceDiagram
-    actor Professor
-    actor UniAdmin as University Admin
-    participant API as FastAPI
-    participant DB as Neon PostgreSQL
-
-    Professor->>API: POST /org/join-requests
-    API->>DB: Insert request (status=pending)
-    API-->>Professor: Request submitted
-
-    UniAdmin->>API: GET /org/join-requests
-    API-->>UniAdmin: Pending requests
-    UniAdmin->>API: PUT /org/join-requests/{id}/review (approve)
-    API->>DB: Update request + set user.university_id
-    API-->>UniAdmin: Approved
+    User->>Frontend: Open protected page
+    Frontend->>API: GET /auth/me (Bearer token)
+    API->>API: Decode + validate JWT
+    API-->>Frontend: UserOut
 ```
 
 ---
 
 ## Conclusion
 
-Sprint 1 establishes the platform's identity foundation. With a role-aware JWT system, profile management, and a clean Region → University → User hierarchy in place, every later feature can rely on a stable authentication context and proper institutional scoping.
+Sprint 1 delivers a minimal but solid authentication layer. With JWT-based sessions and a clear role field carried inside every token, every later sprint can rely on a consistent way to identify the caller and enforce role-based access.

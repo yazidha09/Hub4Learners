@@ -41,6 +41,9 @@ The final sprint completes Hub4Learners with monetisation, insight, and governan
 | US-6.11 | High | As an admin, I can change a user's role and the user is notified | T-6.11.1: Role change endpoint · T-6.11.2: Notification push |
 | US-6.12 | Medium | As an admin, I can list every course, toggle publish state, and (super admin) delete courses | T-6.12.1: Admin course endpoints |
 | US-6.13 | Medium | As a university admin, I can broadcast an announcement to my university | T-6.13.1: Announcement endpoint · T-6.13.2: Fan-out notifications |
+| US-6.14 | High | As a super admin, I can manage Regions and Universities | T-6.14.1: Region & University CRUD · T-6.14.2: Admin panel UI |
+| US-6.15 | High | As a professor, I can submit a request to join a university | T-6.15.1: Join request form · T-6.15.2: Persist request |
+| US-6.16 | High | As a university admin, I can review (approve or reject) professor join requests for my university | T-6.16.1: Review endpoint · T-6.16.2: Pending requests UI · T-6.16.3: Notify professor |
 
 ---
 
@@ -99,9 +102,32 @@ classDiagram
         string body
     }
 
+    class Region {
+        UUID id
+        string name
+    }
+
+    class University {
+        UUID id
+        string name
+        UUID region_id
+    }
+
+    class UniversityJoinRequest {
+        UUID id
+        UUID professor_id
+        UUID university_id
+        string status
+        datetime reviewed_at
+    }
+
     Enrollment "*" --> "1" Course
     Enrollment "*" --> "1" User
     Announcement "*" --> "1" University
+    University "*" --> "1" Region
+    User "*" --> "0..1" University
+    UniversityJoinRequest "*" --> "1" User
+    UniversityJoinRequest "*" --> "1" University
 ```
 
 ### Use Case Diagram — Payments, Analytics & Admin
@@ -124,12 +150,16 @@ graph LR
     UC9([Manage Courses])
     UC10([Delete Course])
     UC11([Post Announcement])
+    UC12([Manage Regions & Universities])
+    UC13([Submit Join Request])
+    UC14([Review Join Requests])
 
     S --> UC1
     S --> UC2
     S --> UC3
     P --> UC4
     P --> UC5
+    P --> UC13
     SA --> UC6
     UA --> UC7
     SA --> UC7
@@ -139,6 +169,8 @@ graph LR
     SA --> UC9
     SA --> UC10
     UA --> UC11
+    SA --> UC12
+    UA --> UC14
 ```
 
 ### Sequence Diagram — Stripe Checkout & Enrollment
@@ -165,6 +197,27 @@ sequenceDiagram
     Stripe-->>API: payment_status=paid
     API->>DB: Insert Enrollment
     API-->>Frontend: Enrollment confirmed
+```
+
+### Sequence Diagram — Professor Join Request Flow
+
+```mermaid
+sequenceDiagram
+    actor Professor
+    actor UniAdmin as University Admin
+    participant API as FastAPI
+    participant DB as Neon PostgreSQL
+
+    Professor->>API: POST /org/join-requests
+    API->>DB: Insert request (status=pending)
+    API-->>Professor: Request submitted
+
+    UniAdmin->>API: GET /org/join-requests
+    API-->>UniAdmin: Pending requests
+    UniAdmin->>API: PUT /org/join-requests/{id}/review (approve)
+    API->>DB: Update request + set user.university_id
+    API-->>UniAdmin: Approved
+    API-->>Professor: Notification
 ```
 
 ### Sequence Diagram — University Announcement Broadcast
