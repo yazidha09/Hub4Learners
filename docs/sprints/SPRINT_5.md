@@ -92,6 +92,13 @@ classDiagram
         string reason
     }
 
+    class DiscussionSummary {
+        UUID subsection_id
+        string summary_md
+        int post_count_at_gen
+        datetime generated_at
+    }
+
     class FriendMessage {
         UUID id
         UUID friendship_id
@@ -113,6 +120,7 @@ classDiagram
     class Announcement {
         UUID id
         UUID university_id
+        UUID created_by
         string title
         string body
     }
