@@ -117,11 +117,8 @@ classDiagram
         string status
     }
 
-    UserGamification "1" --> "1" User
-    XPLog "*" --> "1" User
     UserAchievement "*" --> "1" Achievement
     UserBadge "*" --> "1" Badge
-    Friendship "*" --> "1" User
 ```
 
 ### Use Case Diagram — Gamification & Social

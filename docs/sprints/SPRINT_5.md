@@ -145,7 +145,6 @@ classDiagram
     DiscussionReport "*" --> "1" DiscussionPost
     Message "*" --> "1" ChatRequest
     FriendMessage "*" --> "1" Friendship
-    Notification "*" --> "1" User
 ```
 
 ### Use Case Diagram — Communication & Community

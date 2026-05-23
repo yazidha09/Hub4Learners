@@ -88,8 +88,6 @@ classDiagram
         datetime ai_summary_generated_at
     }
 
-    GeneratedCourse "*" --> "1" User
-    QCMAttempt "*" --> "1" User
     QCMAttempt "*" --> "1" Course
 ```
 
