@@ -120,7 +120,6 @@ classDiagram
     DiscussionPost "0..*" --> "0..1" DiscussionPost
     DiscussionVote "*" --> "1" DiscussionPost
     DiscussionReport "*" --> "1" DiscussionPost
-    FriendMessage "*" --> "1" Friendship
 ```
 
 ### Use Case Diagram — Communication & Community
