@@ -530,6 +530,24 @@ export default function CourseLearningPage() {
     return bestAttemptBySection.get(sectionId ?? '__final__')
   }
 
+  // Sorting sections / subsections / materials was happening on every render
+  // — including inside .map() in the sidebar. Memoize the fully-sorted
+  // hierarchy so it only recomputes when the course payload actually changes.
+  // Must run before the early returns below to keep hook order stable across renders.
+  type SortedSection = NonNullable<CourseOut['sections']>[number] & {
+    sortedSubs: NonNullable<CourseOut['sections']>[number]['subsections']
+    sortedMats: NonNullable<CourseOut['sections']>[number]['materials']
+  }
+  const sortedSections: SortedSection[] = useMemo(() => {
+    if (!course) return []
+    const sections = [...(course.sections || [])].sort((a, b) => a.order_index - b.order_index)
+    return sections.map((s) => ({
+      ...s,
+      sortedSubs: [...(s.subsections ?? [])].sort((a, b) => a.order_index - b.order_index),
+      sortedMats: [...(s.materials ?? [])].sort((a, b) => a.order_index - b.order_index),
+    }))
+  }, [course])
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0C0C0F] flex items-center justify-center">
@@ -553,22 +571,6 @@ export default function CourseLearningPage() {
       </div>
     )
   }
-
-  // Sorting sections / subsections / materials was happening on every render
-  // — including inside .map() in the sidebar. Memoize the fully-sorted
-  // hierarchy so it only recomputes when the course payload actually changes.
-  type SortedSection = typeof course.sections[number] & {
-    sortedSubs: typeof course.sections[number]['subsections']
-    sortedMats: typeof course.sections[number]['materials']
-  }
-  const sortedSections: SortedSection[] = useMemo(() => {
-    const sections = [...(course.sections || [])].sort((a, b) => a.order_index - b.order_index)
-    return sections.map((s) => ({
-      ...s,
-      sortedSubs: [...(s.subsections ?? [])].sort((a, b) => a.order_index - b.order_index),
-      sortedMats: [...(s.materials ?? [])].sort((a, b) => a.order_index - b.order_index),
-    }))
-  }, [course])
 
   return (
     <div className="h-screen flex flex-col bg-[#0C0C0F] text-white overflow-hidden">

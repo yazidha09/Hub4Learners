@@ -861,6 +861,8 @@ function MyCoursesSection({ token, onNavigate }: { token: string; onNavigate: (i
   const [unenrollErr, setUnenrollErr] = useState('')
   const [expandedSection, setExpandedSection] = useState<string | null>(null)
   const [expandedMaterial, setExpandedMaterial] = useState<string | null>(null)
+  const [filter, setFilter] = useState<'all' | 'in_progress' | 'completed' | 'not_started'>('all')
+  const [search, setSearch] = useState('')
 
   useEffect(() => {
     setLoading(true)
@@ -1059,132 +1061,427 @@ function MyCoursesSection({ token, onNavigate }: { token: string; onNavigate: (i
     )
   }
 
+  // Pre-compute counts / filtered list
+  const counts = useMemo(() => {
+    const inProgress = enrolled.filter(c => (c.progress_pct ?? 0) > 0 && c.enrollment_status !== 'completed').length
+    const completed = enrolled.filter(c => c.enrollment_status === 'completed').length
+    const notStarted = enrolled.filter(c => (c.progress_pct ?? 0) === 0 && c.enrollment_status !== 'completed').length
+    return { all: enrolled.length, in_progress: inProgress, completed, not_started: notStarted }
+  }, [enrolled])
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return enrolled.filter(c => {
+      if (filter === 'completed' && c.enrollment_status !== 'completed') return false
+      if (filter === 'in_progress' && !((c.progress_pct ?? 0) > 0 && c.enrollment_status !== 'completed')) return false
+      if (filter === 'not_started' && !((c.progress_pct ?? 0) === 0 && c.enrollment_status !== 'completed')) return false
+      if (q && !(c.title.toLowerCase().includes(q) || c.professor_name.toLowerCase().includes(q))) return false
+      return true
+    })
+  }, [enrolled, filter, search])
+
+  const overallPct = enrolled.length === 0
+    ? 0
+    : Math.round(enrolled.reduce((s, c) => s + (c.progress_pct ?? 0), 0) / enrolled.length)
+
+  const hero = useMemo(
+    () => enrolled.find(c => (c.progress_pct ?? 0) > 0 && c.enrollment_status !== 'completed'),
+    [enrolled],
+  )
+
   return (
-    <div className="max-w-[1080px] animate-fadeIn">
-      <div className="mb-8 flex items-end justify-between flex-wrap gap-4">
+    <div className="max-w-[1200px] animate-fadeIn">
+
+      {/* ── Header ── */}
+      <div className="flex items-end justify-between gap-4 mb-6 flex-wrap">
         <div>
-          <h2 className="text-[1.6rem] font-semibold tracking-[-0.02em] text-[#0C0C0F]">My learning</h2>
-          <p className="text-[0.86rem] text-[#64748B] mt-1">Pick up where you left off.</p>
+          <p className="text-[0.66rem] font-bold tracking-[0.14em] uppercase text-[#FF5533] mb-1.5">Your library</p>
+          <h2 className="text-[1.75rem] font-bold tracking-[-0.03em] text-[#0C0C0F] leading-tight">My Learning</h2>
+          <p className="text-[0.86rem] text-[#94A3B8] mt-1">Pick up where you left off and keep your streak going</p>
         </div>
-        <span className="text-[0.74rem] font-semibold text-[#64748B] bg-white border border-[#E5E7EB] rounded-md px-2.5 py-1">
-          {enrolled.length} course{enrolled.length !== 1 ? 's' : ''}
-        </span>
+        {enrolled.length > 0 && (
+          <button
+            onClick={() => onNavigate('courses')}
+            className="inline-flex items-center gap-2 h-10 px-4 text-[0.82rem] font-semibold text-[#0C0C0F] bg-white border border-[#E5E7EB] hover:border-[#0C0C0F] rounded-xl cursor-pointer transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            Browse more
+          </button>
+        )}
       </div>
 
+      {/* ── Stat strip ── */}
+      {enrolled.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          <div className="bg-white border border-[#E5E7EB] rounded-2xl px-4 py-4 flex items-center gap-3.5 shadow-[0_2px_10px_rgba(12,12,15,0.04)]">
+            <div className="w-11 h-11 rounded-xl bg-[#F1F3F5] flex items-center justify-center shrink-0">
+              <svg className="w-5 h-5 text-[#0C0C0F]" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+              </svg>
+            </div>
+            <div className="min-w-0">
+              <p className="text-[1.4rem] font-bold text-[#0C0C0F] leading-none tabular-nums">{counts.all}</p>
+              <p className="text-[0.66rem] font-bold text-[#94A3B8] uppercase tracking-[0.1em] mt-1.5">Enrolled</p>
+            </div>
+          </div>
+          <div className="bg-white border border-[#E5E7EB] rounded-2xl px-4 py-4 flex items-center gap-3.5 shadow-[0_2px_10px_rgba(12,12,15,0.04)]">
+            <div className="w-11 h-11 rounded-xl bg-[#FFF1ED] flex items-center justify-center shrink-0">
+              <svg className="w-5 h-5 text-[#FF5533]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </div>
+            <div className="min-w-0">
+              <p className="text-[1.4rem] font-bold text-[#FF5533] leading-none tabular-nums">{counts.in_progress}</p>
+              <p className="text-[0.66rem] font-bold text-[#94A3B8] uppercase tracking-[0.1em] mt-1.5">In Progress</p>
+            </div>
+          </div>
+          <div className="bg-white border border-[#E5E7EB] rounded-2xl px-4 py-4 flex items-center gap-3.5 shadow-[0_2px_10px_rgba(12,12,15,0.04)]">
+            <div className="w-11 h-11 rounded-xl bg-emerald-50 flex items-center justify-center shrink-0">
+              <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div className="min-w-0">
+              <p className="text-[1.4rem] font-bold text-emerald-600 leading-none tabular-nums">{counts.completed}</p>
+              <p className="text-[0.66rem] font-bold text-[#94A3B8] uppercase tracking-[0.1em] mt-1.5">Completed</p>
+            </div>
+          </div>
+          <div className="bg-[#0C0C0F] rounded-2xl px-4 py-4 flex items-center gap-3.5 relative overflow-hidden">
+            <div className="absolute -right-6 -bottom-6 w-24 h-24 rounded-full bg-[#FF5533]/15" />
+            <div className="w-11 h-11 rounded-xl bg-white/8 flex items-center justify-center shrink-0 relative" style={{ background: 'rgba(255,255,255,0.08)' }}>
+              <svg className="w-5 h-5 text-[#FF5533]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+              </svg>
+            </div>
+            <div className="min-w-0 relative">
+              <p className="text-[1.4rem] font-bold text-white leading-none tabular-nums">{overallPct}<span className="text-[0.95rem]">%</span></p>
+              <p className="text-[0.66rem] font-bold text-white/55 uppercase tracking-[0.1em] mt-1.5">Avg Progress</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {[...Array(3)].map((_, i) => (
-            <div key={i} className="h-64 rounded-xl skeleton" />
+            <div key={i} className="h-80 rounded-2xl skeleton" />
           ))}
         </div>
       ) : enrolled.length === 0 ? (
-        <div className="text-center py-20 bg-white rounded-xl border border-dashed border-[#E5E7EB]">
-          <p className="text-[1rem] font-semibold text-[#0C0C0F] mb-1">No courses yet</p>
-          <p className="text-[0.86rem] text-[#64748B] mb-6">Enroll in a course to start learning.</p>
+        <div className="text-center py-24 bg-white rounded-2xl border border-dashed border-[#E5E7EB]">
+          <div className="w-16 h-16 mx-auto mb-5 rounded-2xl bg-[#F1F3F5] flex items-center justify-center">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" />
+            </svg>
+          </div>
+          <p className="text-[1.05rem] font-bold text-[#0C0C0F] mb-2">No courses yet</p>
+          <p className="text-[0.86rem] text-[#94A3B8] mb-6">Enroll in a course to start learning.</p>
           <button onClick={() => onNavigate('courses')}
-            className="h-10 px-5 text-[0.84rem] font-semibold text-white bg-[#0C0C0F] rounded-lg hover:bg-[#1E1E23] transition-colors border-none cursor-pointer">
+            className="h-10 px-6 text-[0.84rem] font-semibold text-white bg-[#0C0C0F] rounded-xl hover:bg-[#1E1E23] transition-colors border-none cursor-pointer">
             Browse courses
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 stagger-children">
-          {enrolled.map(c => {
-            const pct = c.progress_pct ?? 0
-            const isDone = c.enrollment_status === 'completed'
-            return (
-              <div key={c.id} className="group bg-white rounded-xl border border-[#E5E7EB] overflow-hidden flex flex-col transition-all hover:border-[#0C0C0F] hover:shadow-[0_8px_24px_rgba(12,12,15,0.06)]">
-                {/* Thumbnail */}
-                <div
-                  className="relative aspect-[16/9] cursor-pointer overflow-hidden bg-[#0C0C0F]"
-                  onClick={async () => { const full = await getCourseDetail(c.id); setSelected(full) }}
+        <>
+          {/* ── Resume banner for most-recent in-progress course ── */}
+          {hero && (
+            <div
+              className="mb-6 relative overflow-hidden rounded-2xl cursor-pointer group"
+              onClick={() => navigate(`/learn/${hero.id}`)}
+            >
+              <div className="absolute inset-0 bg-[#0C0C0F]" />
+              {hero.thumbnail && (
+                <img
+                  src={`http://localhost:8000/uploads/${hero.thumbnail}`}
+                  alt=""
+                  className="absolute inset-0 w-full h-full object-cover opacity-20 transition-transform duration-700 group-hover:scale-105"
+                />
+              )}
+              <div className="absolute inset-0 bg-gradient-to-r from-[#0C0C0F] via-[#0C0C0F]/85 to-[#0C0C0F]/20" />
+              <div className="absolute -right-20 -top-20 w-72 h-72 rounded-full bg-[#FF5533]/15 blur-3xl" />
+              <div className="relative z-10 p-6 flex flex-col sm:flex-row sm:items-center gap-5">
+                <div className="flex-1 min-w-0">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#FF5533]/15 text-[#FF5533] text-[0.6rem] font-bold tracking-[0.14em] uppercase mb-3">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#FF5533] animate-pulse" />
+                    Continue where you left off
+                  </span>
+                  <h3 className="text-[1.3rem] font-bold text-white leading-snug line-clamp-1 mb-1">{hero.title}</h3>
+                  <p className="text-[0.78rem] text-white/45 mb-5">by {hero.professor_name} · {hero.sections_count} section{hero.sections_count !== 1 ? 's' : ''}</p>
+                  <div className="flex items-center gap-3 max-w-md">
+                    <div className="flex-1 h-1.5 bg-white/15 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-[#FF5533] to-[#ff7a5e] rounded-full transition-all duration-500"
+                        style={{ width: `${hero.progress_pct ?? 0}%` }}
+                      />
+                    </div>
+                    <span className="text-[0.74rem] font-bold text-white/80 tabular-nums shrink-0">{hero.progress_pct ?? 0}% complete</span>
+                  </div>
+                </div>
+                <button
+                  onClick={e => { e.stopPropagation(); navigate(`/learn/${hero.id}`) }}
+                  className="shrink-0 flex items-center gap-2 h-11 px-6 bg-[#FF5533] text-white text-[0.84rem] font-bold rounded-xl border-none cursor-pointer hover:bg-[#e5482b] transition-colors shadow-lg shadow-[#FF5533]/30"
                 >
-                  {c.thumbnail ? (
-                    <img src={`http://localhost:8000/uploads/${c.thumbnail}`} alt={c.title}
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03]" />
-                  ) : (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <span className="text-white/90 text-[2.5rem] font-semibold tracking-tight">{c.title.charAt(0).toUpperCase()}</span>
-                    </div>
-                  )}
-
-                  <div className="absolute top-2.5 right-2.5" onClick={e => e.stopPropagation()}>
-                    {confirmUnenroll === c.id ? (
-                      <div className="flex items-center gap-1 bg-white rounded-lg shadow-md p-1 border border-[#E5E7EB]">
-                        <button onClick={() => handleUnenroll(c.id)} disabled={unenrolling}
-                          className="px-2 py-1 text-[0.68rem] font-semibold text-white bg-red-500 hover:bg-red-600 rounded-md border-none cursor-pointer transition-colors">
-                          {unenrolling ? '…' : 'Remove'}
-                        </button>
-                        <button onClick={() => setConfirmUnenroll(null)}
-                          className="px-2 py-1 text-[0.68rem] font-semibold text-[#64748B] bg-[#F1F3F5] hover:bg-[#E5E7EB] rounded-md border-none cursor-pointer transition-colors">
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <button onClick={() => setConfirmUnenroll(c.id)}
-                        className="w-7 h-7 rounded-md bg-white/90 backdrop-blur-sm flex items-center justify-center text-[#64748B] hover:text-red-500 border-none cursor-pointer transition-colors opacity-0 group-hover:opacity-100"
-                        title="Remove course">
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Body */}
-                <div className="p-4 flex flex-col flex-1">
-                  <h3
-                    className="text-[0.92rem] font-semibold text-[#0C0C0F] leading-snug mb-1.5 line-clamp-2 cursor-pointer group-hover:text-[#FF5533] transition-colors"
-                    onClick={async () => { const full = await getCourseDetail(c.id); setSelected(full) }}
-                  >{c.title}</h3>
-                  <p className="text-[0.76rem] text-[#94A3B8] truncate mb-4">{c.professor_name}</p>
-
-                  {/* Progress */}
-                  {isDone ? (
-                    <div className="mb-4 inline-flex items-center gap-1 text-[0.72rem] font-semibold text-emerald-600">
-                      <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                      </svg>
-                      Completed
-                    </div>
-                  ) : pct > 0 ? (
-                    <div className="mb-4">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-[0.7rem] font-semibold text-[#64748B]">Progress</span>
-                        <span className="text-[0.7rem] font-semibold text-[#0C0C0F] tabular-nums">{pct}%</span>
-                      </div>
-                      <div className="w-full h-1 bg-[#F1F3F5] rounded-full overflow-hidden">
-                        <div className="h-full bg-[#FF5533] rounded-full" style={{ width: `${pct}%` }} />
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="mb-4 text-[0.72rem] text-[#94A3B8]">{c.sections_count} section{c.sections_count !== 1 ? 's' : ''}</p>
-                  )}
-
-                  <div className="mt-auto flex items-center gap-2">
-                    <button
-                      onClick={() => navigate(`/learn/${c.id}`)}
-                      className="flex-1 h-9 bg-[#0C0C0F] text-white text-[0.78rem] font-semibold rounded-lg hover:bg-[#1E1E23] transition-colors flex items-center justify-center gap-1.5 border-none cursor-pointer">
-                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
-                        <polygon points="5 3 19 12 5 21 5 3" />
-                      </svg>
-                      {pct > 0 && !isDone ? 'Continue' : isDone ? 'Review' : 'Start'}
-                    </button>
-                    <button
-                      onClick={async () => { const full = await getCourseDetail(c.id); setSelected(full) }}
-                      className="h-9 w-9 bg-white text-[#64748B] hover:text-[#0C0C0F] border border-[#E5E7EB] hover:border-[#0C0C0F] rounded-lg transition-colors flex items-center justify-center cursor-pointer"
-                      title="Course details">
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v.01M12 12v6" />
-                        <circle cx="12" cy="12" r="9" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
+                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                    <polygon points="5 3 19 12 5 21 5 3" />
+                  </svg>
+                  Resume
+                </button>
               </div>
-            )
-          })}
-        </div>
+            </div>
+          )}
+
+          {/* ── Filter + Search toolbar ── */}
+          <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
+            <div className="flex items-center gap-1.5 bg-white border border-[#E5E7EB] rounded-xl p-1 shadow-[0_2px_8px_rgba(12,12,15,0.03)]">
+              {([
+                { key: 'all', label: 'All' },
+                { key: 'in_progress', label: 'In Progress' },
+                { key: 'completed', label: 'Completed' },
+                { key: 'not_started', label: 'Not Started' },
+              ] as const).map(t => {
+                const active = filter === t.key
+                const count = counts[t.key]
+                return (
+                  <button
+                    key={t.key}
+                    onClick={() => setFilter(t.key)}
+                    className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[0.76rem] font-semibold border-none cursor-pointer transition-colors ${
+                      active
+                        ? 'bg-[#0C0C0F] text-white'
+                        : 'bg-transparent text-[#64748B] hover:bg-[#F1F3F5]'
+                    }`}
+                  >
+                    {t.label}
+                    <span className={`min-w-[18px] h-[18px] px-1 rounded-md flex items-center justify-center text-[0.65rem] font-bold tabular-nums ${
+                      active ? 'bg-white/15 text-white' : 'bg-[#F1F3F5] text-[#94A3B8]'
+                    }`}>{count}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <div className="relative flex-1 min-w-[200px] sm:max-w-xs sm:flex-initial">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#94A3B8]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+              </svg>
+              <input
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search your courses…"
+                className="w-full h-10 pl-9 pr-3 bg-white border border-[#E5E7EB] rounded-xl text-[0.82rem] text-[#0C0C0F] placeholder:text-[#94A3B8] outline-none focus:border-[#0C0C0F] focus:shadow-[0_0_0_3px_rgba(12,12,15,0.07)] transition-all"
+              />
+            </div>
+          </div>
+
+          {filtered.length === 0 ? (
+            <div className="text-center py-16 bg-white rounded-2xl border border-dashed border-[#E5E7EB]">
+              <p className="text-[0.92rem] font-bold text-[#0C0C0F] mb-1">No matching courses</p>
+              <p className="text-[0.82rem] text-[#94A3B8]">Try clearing the filter or search term.</p>
+            </div>
+          ) : (
+            /* ── Course Grid ── */
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 stagger-children">
+              {filtered.map(c => {
+                const pct = c.progress_pct ?? 0
+                const isDone = c.enrollment_status === 'completed'
+                const isStarted = pct > 0 && !isDone
+                return (
+                  <div
+                    key={c.id}
+                    className="group bg-white rounded-2xl border border-[#E5E7EB] overflow-hidden flex flex-col transition-all duration-300 hover:shadow-[0_20px_60px_rgba(12,12,15,0.12)] hover:-translate-y-1 hover:border-[#CBD5E1]"
+                  >
+                    {/* Thumbnail */}
+                    <div
+                      className="relative aspect-[16/9] cursor-pointer overflow-hidden bg-[#0C0C0F]"
+                      onClick={async () => { const full = await getCourseDetail(c.id); setSelected(full) }}
+                    >
+                      {c.thumbnail ? (
+                        <img
+                          src={`http://localhost:8000/uploads/${c.thumbnail}`}
+                          alt={c.title}
+                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"
+                        />
+                      ) : (
+                        <div className="absolute inset-0 bg-gradient-to-br from-[#1E1E2A] via-[#0C0C0F] to-[#FF5533]/30 flex items-center justify-center">
+                          <span className="text-white/90 text-[2.5rem] font-black tracking-tight">
+                            {c.title.charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
+
+                      {/* Status badge top-left */}
+                      <div className="absolute top-3 left-3 flex items-center gap-1.5">
+                        {isDone ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.62rem] font-bold uppercase tracking-wide bg-emerald-500 text-white shadow-lg shadow-emerald-500/30">
+                            <svg width="9" height="9" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                            Done
+                          </span>
+                        ) : isStarted ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.62rem] font-bold uppercase tracking-wide bg-[#FF5533] text-white shadow-lg shadow-[#FF5533]/30">
+                            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                            In Progress
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.62rem] font-bold uppercase tracking-wide bg-white/95 text-[#0C0C0F] shadow-lg backdrop-blur-sm">
+                            New
+                          </span>
+                        )}
+                        {c.category_name && (
+                          <span className="hidden sm:inline-block px-2.5 py-1 rounded-full text-[0.62rem] font-semibold bg-black/40 backdrop-blur-sm text-white border border-white/15">
+                            {c.category_name}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Unenroll button */}
+                      <div className="absolute top-3 right-3" onClick={e => e.stopPropagation()}>
+                        {confirmUnenroll === c.id ? (
+                          <div className="flex items-center gap-1 bg-white rounded-xl shadow-xl p-1 border border-[#E5E7EB]">
+                            <button
+                              onClick={() => handleUnenroll(c.id)}
+                              disabled={unenrolling}
+                              className="px-2.5 py-1 text-[0.68rem] font-semibold text-white bg-red-500 hover:bg-red-600 rounded-lg border-none cursor-pointer transition-colors disabled:opacity-50"
+                            >
+                              {unenrolling ? '…' : 'Remove'}
+                            </button>
+                            <button
+                              onClick={() => setConfirmUnenroll(null)}
+                              className="px-2 py-1 text-[0.68rem] font-semibold text-[#64748B] bg-[#F1F3F5] hover:bg-[#E5E7EB] rounded-lg border-none cursor-pointer transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmUnenroll(c.id)}
+                            className="w-8 h-8 rounded-lg bg-black/55 backdrop-blur-sm flex items-center justify-center text-white/75 hover:text-white hover:bg-black/75 border-none cursor-pointer transition-all opacity-0 group-hover:opacity-100"
+                            title="Remove course"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Play overlay on hover */}
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        <div className="w-14 h-14 rounded-full bg-white/95 flex items-center justify-center shadow-2xl scale-90 group-hover:scale-100 transition-transform duration-300">
+                          <svg className="w-5 h-5 text-[#0C0C0F] ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                            <polygon points="5 3 19 12 5 21 5 3" />
+                          </svg>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Card body */}
+                    <div className="p-5 flex flex-col flex-1">
+                      <h3
+                        className="text-[0.98rem] font-bold text-[#0C0C0F] leading-snug mb-2 line-clamp-2 cursor-pointer group-hover:text-[#FF5533] transition-colors duration-200 min-h-[2.5rem]"
+                        onClick={async () => { const full = await getCourseDetail(c.id); setSelected(full) }}
+                      >
+                        {c.title}
+                      </h3>
+
+                      {/* Instructor */}
+                      <div className="flex items-center gap-2 mb-4">
+                        <span className="w-6 h-6 rounded-full bg-gradient-to-br from-[#1E1E2A] to-[#0C0C0F] flex items-center justify-center text-white text-[0.6rem] font-bold shrink-0">
+                          {c.professor_name.charAt(0).toUpperCase()}
+                        </span>
+                        <p className="text-[0.76rem] text-[#64748B] truncate">{c.professor_name}</p>
+                      </div>
+
+                      {/* Progress section */}
+                      <div className="mb-4">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[0.66rem] font-bold uppercase tracking-wider text-[#94A3B8]">
+                            {isDone ? 'Completed' : isStarted ? 'Progress' : 'Not started'}
+                          </span>
+                          <span className={`text-[0.74rem] font-bold tabular-nums ${
+                            isDone ? 'text-emerald-600' : isStarted ? 'text-[#FF5533]' : 'text-[#94A3B8]'
+                          }`}>{pct}%</span>
+                        </div>
+                        <div className="h-1.5 bg-[#F1F3F5] rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all duration-500 ${
+                              isDone ? 'bg-emerald-500' : 'bg-gradient-to-r from-[#FF5533] to-[#ff7a5e]'
+                            }`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Footer meta + actions */}
+                      <div className="mt-auto">
+                        <div className="flex items-center gap-3 text-[0.7rem] text-[#94A3B8] mb-3">
+                          <span className="inline-flex items-center gap-1">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                            </svg>
+                            {c.sections_count} section{c.sections_count !== 1 ? 's' : ''}
+                          </span>
+                          <span className="w-1 h-1 rounded-full bg-[#CBD5E1]" />
+                          <span className="inline-flex items-center gap-1">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+                            </svg>
+                            {c.enrolled_count}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => navigate(`/learn/${c.id}`)}
+                            className={`flex-1 h-10 text-[0.82rem] font-bold rounded-xl flex items-center justify-center gap-1.5 border-none cursor-pointer transition-all duration-200 ${
+                              isDone
+                                ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                : isStarted
+                                  ? 'bg-[#FF5533] text-white hover:bg-[#e5482b] shadow-sm shadow-[#FF5533]/30 hover:shadow-md hover:shadow-[#FF5533]/40'
+                                  : 'bg-[#0C0C0F] text-white hover:bg-[#1E1E23]'
+                            }`}
+                          >
+                            {isDone ? (
+                              <>
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                </svg>
+                                Review
+                              </>
+                            ) : (
+                              <>
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                                  <polygon points="5 3 19 12 5 21 5 3" />
+                                </svg>
+                                {isStarted ? 'Continue' : 'Start'}
+                              </>
+                            )}
+                          </button>
+                          <button
+                            onClick={async () => { const full = await getCourseDetail(c.id); setSelected(full) }}
+                            className="h-10 w-10 bg-white text-[#64748B] hover:text-[#0C0C0F] border border-[#E5E7EB] hover:border-[#0C0C0F] rounded-xl transition-all flex items-center justify-center cursor-pointer shrink-0"
+                            title="Course details"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                              <circle cx="12" cy="12" r="9" />
+                              <line x1="12" y1="8" x2="12" y2="12" strokeLinecap="round" />
+                              <line x1="12" y1="16" x2="12.01" y2="16" strokeLinecap="round" strokeWidth="2.5" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
       )}
     </div>
   )

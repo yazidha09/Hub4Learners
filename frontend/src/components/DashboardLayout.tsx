@@ -7,6 +7,7 @@ import type { UpdateProfileData } from '../api/auth'
 import { listCategories, type CategoryOut } from '../api/category'
 import Modal from './Modal'
 import { useNotifications, type AppNotification, type NotificationType } from '../hooks/useNotifications'
+import { useSettings } from '../hooks/useSettings'
 
 export interface NavItem {
   id: string
@@ -69,6 +70,25 @@ const NOTIF_COLORS: Record<NotificationType | string, string> = {
   enrollment:              'bg-teal-100 text-teal-600',
   role_changed:            'bg-purple-100 text-purple-600',
   announcement:            'bg-orange-100 text-orange-500',
+}
+
+function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative w-10 h-6 rounded-full transition-colors border-none cursor-pointer shrink-0 ${
+        checked ? 'bg-[#0C0C0F]' : 'bg-[#D1D5DB]'
+      }`}
+    >
+      <span
+        className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow-sm transition-all ${
+          checked ? 'left-5' : 'left-1'
+        }`}
+      />
+    </button>
+  )
 }
 
 function timeAgo(iso: string): string {
@@ -223,10 +243,11 @@ export default function DashboardLayout({
   settingsExtra?: React.ReactNode
 }) {
   const { user, token, logout, refreshUser } = useAuth()
+  const { settings, updateSettings } = useSettings()
   const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<'profile' | 'password'>('profile')
+  const [settingsTab, setSettingsTab] = useState<'profile' | 'security' | 'appearance' | 'notifications' | 'privacy'>('profile')
   const [saving, setSaving] = useState(false)
   const [settingsMsg, setSettingsMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [notifOpen, setNotifOpen] = useState(false)
@@ -282,6 +303,7 @@ export default function DashboardLayout({
     setSettingsMsg(null)
     setSettingsTab('profile')
     setSettingsOpen(true)
+
     listCategories().then(setCategories).catch(() => {})
   }
 
@@ -471,28 +493,29 @@ export default function DashboardLayout({
 
       {/* Settings Modal */}
       <Modal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} title="Settings" size="lg">
-        {/* Tabs */}
+        {/* Tab bar — 5 tabs */}
         <div className="flex gap-1 mb-6 bg-[#F1F3F5] rounded-lg p-1">
-          <button
-            onClick={() => { setSettingsTab('profile'); setSettingsMsg(null) }}
-            className={`flex-1 py-2 text-[0.8rem] font-medium rounded-md transition-all border-none cursor-pointer ${
-              settingsTab === 'profile'
-                ? 'bg-white text-[#0C0C0F] shadow-sm'
-                : 'bg-transparent text-[#94A3B8] hover:text-[#0C0C0F]'
-            }`}
-          >
-            Profile
-          </button>
-          <button
-            onClick={() => { setSettingsTab('password'); setSettingsMsg(null) }}
-            className={`flex-1 py-2 text-[0.8rem] font-medium rounded-md transition-all border-none cursor-pointer ${
-              settingsTab === 'password'
-                ? 'bg-white text-[#0C0C0F] shadow-sm'
-                : 'bg-transparent text-[#94A3B8] hover:text-[#0C0C0F]'
-            }`}
-          >
-            Password
-          </button>
+          {(
+            [
+              { id: 'profile',       label: 'Profile' },
+              { id: 'security',      label: 'Security' },
+              { id: 'appearance',    label: 'Appearance' },
+              { id: 'notifications', label: 'Notifs' },
+              { id: 'privacy',       label: 'Privacy' },
+            ] as const
+          ).map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => { setSettingsTab(tab.id); setSettingsMsg(null) }}
+              className={`flex-1 py-2 text-[0.75rem] font-medium rounded-md transition-all border-none cursor-pointer ${
+                settingsTab === tab.id
+                  ? 'bg-white text-[#0C0C0F] shadow-sm'
+                  : 'bg-transparent text-[#94A3B8] hover:text-[#0C0C0F]'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
         {/* Status message */}
@@ -506,9 +529,9 @@ export default function DashboardLayout({
           </div>
         )}
 
+        {/* ── Profile tab ── */}
         {settingsTab === 'profile' && (
           <div className="flex flex-col gap-4">
-            {/* Avatar preview */}
             <div className="flex items-center gap-4 mb-2">
               <div className="w-14 h-14 rounded-full bg-[#0C0C0F] text-white flex items-center justify-center text-[1rem] font-semibold uppercase shrink-0">
                 {initials}
@@ -580,7 +603,8 @@ export default function DashboardLayout({
           </div>
         )}
 
-        {settingsTab === 'password' && (
+        {/* ── Security tab ── */}
+        {settingsTab === 'security' && (
           <div className="flex flex-col gap-4">
             <div>
               <label className="block text-[0.7rem] font-semibold text-[#94A3B8] uppercase tracking-wide mb-1.5">Current Password</label>
@@ -619,6 +643,208 @@ export default function DashboardLayout({
             >
               {saving ? 'Changing...' : 'Change Password'}
             </button>
+          </div>
+        )}
+
+        {/* ── Appearance tab ── */}
+        {settingsTab === 'appearance' && (
+          <div className="flex flex-col gap-5">
+            {/* Theme */}
+            <div>
+              <label className="block text-[0.7rem] font-semibold text-[#94A3B8] uppercase tracking-wide mb-3">Theme</label>
+              <div className="grid grid-cols-3 gap-2">
+                {(
+                  [
+                    {
+                      value: 'light' as const,
+                      label: 'Light',
+                      icon: (
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="5"/>
+                          <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+                          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                          <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+                          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                        </svg>
+                      ),
+                    },
+                    {
+                      value: 'dark' as const,
+                      label: 'Dark',
+                      icon: (
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                        </svg>
+                      ),
+                    },
+                    {
+                      value: 'system' as const,
+                      label: 'System',
+                      icon: (
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                          <line x1="8" y1="21" x2="16" y2="21"/>
+                          <line x1="12" y1="17" x2="12" y2="21"/>
+                        </svg>
+                      ),
+                    },
+                  ]
+                ).map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => updateSettings({ theme: opt.value })}
+                    className={`flex flex-col items-center gap-2 py-3 px-2 rounded-xl border-2 transition-all cursor-pointer ${
+                      settings.theme === opt.value
+                        ? 'border-[#0C0C0F] bg-[#0C0C0F] text-white'
+                        : 'border-[#E5E7EB] bg-white text-[#94A3B8] hover:border-[#0C0C0F] hover:text-[#0C0C0F]'
+                    }`}
+                  >
+                    {opt.icon}
+                    <span className="text-[0.72rem] font-semibold">{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Compact mode */}
+            <div className="flex items-center justify-between py-3 px-4 rounded-xl border border-[#E5E7EB] bg-[#F8FAFC]">
+              <div>
+                <div className="text-[0.82rem] font-semibold text-[#0C0C0F]">Compact Mode</div>
+                <div className="text-[0.72rem] text-[#94A3B8] mt-0.5">Reduce spacing for a denser layout</div>
+              </div>
+              <ToggleSwitch
+                checked={settings.compactMode}
+                onChange={v => updateSettings({ compactMode: v })}
+              />
+            </div>
+
+            {/* Font size */}
+            <div>
+              <label className="block text-[0.7rem] font-semibold text-[#94A3B8] uppercase tracking-wide mb-3">Font Size</label>
+              <div className="flex gap-2">
+                {(['Small', 'Normal', 'Large'] as const).map((size, i) => {
+                  const vals = ['small', 'normal', 'large'] as const
+                  const current = (settings as any).fontSize ?? 'normal'
+                  return (
+                    <button
+                      key={size}
+                      onClick={() => updateSettings({ ...(settings as any), fontSize: vals[i] } as any)}
+                      className={`flex-1 h-9 rounded-lg border text-[0.78rem] font-medium transition-all cursor-pointer ${
+                        current === vals[i]
+                          ? 'border-[#0C0C0F] bg-[#0C0C0F] text-white'
+                          : 'border-[#E5E7EB] bg-white text-[#94A3B8] hover:border-[#0C0C0F] hover:text-[#0C0C0F]'
+                      }`}
+                    >
+                      {size}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Reduce animations */}
+            <div className="flex items-center justify-between py-3 px-4 rounded-xl border border-[#E5E7EB] bg-[#F8FAFC]">
+              <div>
+                <div className="text-[0.82rem] font-semibold text-[#0C0C0F]">Reduce Animations</div>
+                <div className="text-[0.72rem] text-[#94A3B8] mt-0.5">Minimize motion effects across the app</div>
+              </div>
+              <ToggleSwitch
+                checked={(settings as any).reduceMotion ?? false}
+                onChange={v => updateSettings({ ...(settings as any), reduceMotion: v } as any)}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* ── Notifications tab ── */}
+        {settingsTab === 'notifications' && (
+          <div className="flex flex-col gap-2">
+            <p className="text-[0.75rem] text-[#94A3B8] mb-2">Choose which notifications you want to receive.</p>
+            {(
+              [
+                { key: 'notif_friendRequest' as const, label: 'Friend Requests', desc: 'When someone sends you a friend request' },
+                { key: 'notif_messages' as const,       label: 'Messages',        desc: 'When you receive a new message' },
+                { key: 'notif_enrollment' as const,     label: 'Enrollment',      desc: 'Updates about your course enrollments' },
+                { key: 'notif_announcements' as const,  label: 'Announcements',   desc: 'Platform-wide announcements' },
+                { key: 'notif_roleChanges' as const,    label: 'Role Changes',    desc: 'When your account role is updated' },
+                { key: 'notif_sounds' as const,         label: 'Sound Effects',   desc: 'Play a sound for incoming notifications' },
+              ]
+            ).map(item => (
+              <div
+                key={item.key}
+                className="flex items-center justify-between py-3 px-4 rounded-xl border border-[#E5E7EB] bg-[#F8FAFC] hover:border-slate-300 transition-colors"
+              >
+                <div>
+                  <div className="text-[0.82rem] font-semibold text-[#0C0C0F]">{item.label}</div>
+                  <div className="text-[0.7rem] text-[#94A3B8] mt-0.5">{item.desc}</div>
+                </div>
+                <ToggleSwitch
+                  checked={settings[item.key]}
+                  onChange={v => updateSettings({ [item.key]: v })}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── Privacy tab ── */}
+        {settingsTab === 'privacy' && (
+          <div className="flex flex-col gap-4">
+            {/* Profile visibility */}
+            <div>
+              <label className="block text-[0.7rem] font-semibold text-[#94A3B8] uppercase tracking-wide mb-1.5">Profile Visibility</label>
+              <select
+                value={settings.profileVisibility}
+                onChange={e => updateSettings({ profileVisibility: e.target.value as any })}
+                className="w-full h-10 px-3 border border-[#E5E7EB] rounded-lg text-[0.85rem] text-[#0C0C0F] outline-none transition-shadow focus:shadow-[0_0_0_3px_rgba(12,12,15,0.07)] bg-white cursor-pointer"
+              >
+                <option value="public">Public — Anyone can view your profile</option>
+                <option value="friends">Friends Only — Only your connections</option>
+                <option value="private">Private — Only you can see your profile</option>
+              </select>
+            </div>
+
+            {/* Show online status */}
+            <div className="flex items-center justify-between py-3 px-4 rounded-xl border border-[#E5E7EB] bg-[#F8FAFC]">
+              <div>
+                <div className="text-[0.82rem] font-semibold text-[#0C0C0F]">Show Online Status</div>
+                <div className="text-[0.72rem] text-[#94A3B8] mt-0.5">Let others see when you're active</div>
+              </div>
+              <ToggleSwitch
+                checked={settings.showOnlineStatus}
+                onChange={v => updateSettings({ showOnlineStatus: v })}
+              />
+            </div>
+
+            {/* Allow friend requests */}
+            <div className="flex items-center justify-between py-3 px-4 rounded-xl border border-[#E5E7EB] bg-[#F8FAFC]">
+              <div>
+                <div className="text-[0.82rem] font-semibold text-[#0C0C0F]">Allow Friend Requests</div>
+                <div className="text-[0.72rem] text-[#94A3B8] mt-0.5">Let other users send you friend requests</div>
+              </div>
+              <ToggleSwitch
+                checked={settings.allowFriendRequests}
+                onChange={v => updateSettings({ allowFriendRequests: v })}
+              />
+            </div>
+
+            {/* Activity visibility */}
+            <div className="flex items-center justify-between py-3 px-4 rounded-xl border border-[#E5E7EB] bg-[#F8FAFC]">
+              <div>
+                <div className="text-[0.82rem] font-semibold text-[#0C0C0F]">Show Learning Activity</div>
+                <div className="text-[0.72rem] text-[#94A3B8] mt-0.5">Display your course progress on your profile</div>
+              </div>
+              <ToggleSwitch
+                checked={(settings as any).showActivity ?? true}
+                onChange={v => updateSettings({ ...(settings as any), showActivity: v } as any)}
+              />
+            </div>
+
+            <div className="mt-1 px-4 py-3 rounded-xl bg-amber-50 border border-amber-100">
+              <p className="text-[0.72rem] text-amber-700">
+                Privacy settings are stored locally. Server-side enforcement will be available in a future update.
+              </p>
+            </div>
           </div>
         )}
       </Modal>

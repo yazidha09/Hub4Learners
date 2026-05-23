@@ -18,6 +18,15 @@
   --accent: #ff5533;
   --accent-strong: #e5482b;
   --accent-light: rgba(255, 85, 51, 0.08);
+
+  /* Dark mode overrideable vars */
+  --dm-surface: #ffffff;
+  --dm-surface-2: #f8fafc;
+  --dm-surface-3: #f1f5f9;
+  --dm-page-bg: #f8fafc;
+  --dm-text: #0f172a;
+  --dm-text-muted: #64748b;
+  --dm-border: #e2e8f0;
   --radius-xl: 20px;
   --radius-lg: 16px;
   --radius-md: 12px;
@@ -393,3 +402,133 @@ input:-webkit-autofill:focus {
 .stagger-children > *:nth-child(6) { animation-delay: 250ms; }
 .stagger-children > *:nth-child(7) { animation-delay: 300ms; }
 .stagger-children > *:nth-child(8) { animation-delay: 350ms; }
+
+/* ─── Dark Mode ─────────────────────────────────────────────────────────────── */
+
+html.dark {
+  --bg-light: #0c0c0f;
+  --surface-contrast: #16161e;
+  --border: #2d2d3a;
+  --border-strong: #3d3d4a;
+  --text: #f1f5f9;
+  --text-subtle: #94a3b8;
+  --text-muted: #64748b;
+  --dm-surface: #16161e;
+  --dm-surface-2: #1a1a24;
+  --dm-surface-3: #1e1e2a;
+  --dm-page-bg: #0c0c0f;
+  --dm-text: #f1f5f9;
+  --dm-text-muted: #94a3b8;
+  --dm-border: #2d2d3a;
+  color-scheme: dark;
+}
+
+html.dark body {
+  background: #0c0c0f;
+  color: #f1f5f9;
+}
+
+/* Page / container backgrounds */
+html.dark .bg-white           { background-color: #16161e !important; }
+html.dark .bg-gray-50         { background-color: #1a1a24 !important; }
+html.dark .bg-slate-50        { background-color: #1a1a24 !important; }
+html.dark .bg-\[\#F6F8FB\]   { background-color: #0c0c0f !important; }
+html.dark .bg-\[\#F1F3F5\]   { background-color: #1a1a24 !important; }
+html.dark .bg-\[\#F8FAFC\]   { background-color: #0c0c0f !important; }
+
+/* Text colors */
+html.dark .text-gray-900      { color: #f1f5f9 !important; }
+html.dark .text-gray-800      { color: #e2e8f0 !important; }
+html.dark .text-gray-700      { color: #cbd5e1 !important; }
+html.dark .text-gray-600      { color: #94a3b8 !important; }
+html.dark .text-gray-500      { color: #64748b !important; }
+html.dark .text-gray-400      { color: #475569 !important; }
+html.dark .text-slate-900     { color: #f1f5f9 !important; }
+html.dark .text-slate-800     { color: #e2e8f0 !important; }
+html.dark .text-slate-700     { color: #cbd5e1 !important; }
+html.dark .text-slate-600     { color: #94a3b8 !important; }
+html.dark .text-slate-500     { color: #64748b !important; }
+html.dark .text-slate-400     { color: #475569 !important; }
+html.dark .text-\[\#0C0C0F\]  { color: #f1f5f9 !important; }
+html.dark .text-\[\#1E1E23\]  { color: #e2e8f0 !important; }
+
+/* Borders */
+html.dark .border-gray-100    { border-color: #2d2d3a !important; }
+html.dark .border-gray-200    { border-color: #2d2d3a !important; }
+html.dark .border-slate-100   { border-color: #2d2d3a !important; }
+html.dark .border-slate-200   { border-color: #2d2d3a !important; }
+html.dark .border-\[\#E5E7EB\] { border-color: #2d2d3a !important; }
+
+/* Inputs & selects */
+html.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html.dark textarea,
+html.dark select {
+  background-color: #1e1e2a !important;
+  color: #f1f5f9 !important;
+  border-color: #2d2d3a !important;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #475569 !important;
+}
+
+html.dark input:-webkit-autofill,
+html.dark input:-webkit-autofill:hover,
+html.dark input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f1f5f9;
+  -webkit-box-shadow: 0 0 0px 1000px #1e1e2a inset;
+}
+
+/* Scrollbar in dark mode */
+html.dark ::-webkit-scrollbar-track { background: #1a1a24; }
+html.dark ::-webkit-scrollbar-thumb { background: #3d3d4a; }
+html.dark ::-webkit-scrollbar-thumb:hover { background: #4d4d5a; }
+
+/* Card classes */
+html.dark .card-interactive {
+  background: #16161e !important;
+  border-color: #2d2d3a !important;
+}
+html.dark .card-soft {
+  background: rgba(22, 22, 30, 0.9) !important;
+  border-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Badge neutral */
+html.dark .badge-neutral {
+  background: #1e1e28 !important;
+  color: #94a3b8 !important;
+  border-color: #2d2d3a !important;
+}
+
+/* Button secondary */
+html.dark .btn-secondary {
+  background: #1e1e2a !important;
+  color: #cbd5e1 !important;
+  border-color: #2d2d3a !important;
+}
+html.dark .btn-secondary:hover:not(:disabled) {
+  background: #2a2a38 !important;
+  border-color: #3d3d4a !important;
+}
+
+/* Skeleton in dark mode */
+html.dark .skeleton {
+  background: linear-gradient(90deg, #1e1e2a 0%, #2a2a38 50%, #1e1e2a 100%) !important;
+  background-size: 200% 100% !important;
+}
+
+/* ─── Compact Mode ──────────────────────────────────────────────────────────── */
+
+html.compact body {
+  font-size: 0.92em;
+}
+
+html.compact .px-6 { padding-left: 1rem !important; padding-right: 1rem !important; }
+html.compact .py-5 { padding-top: 0.75rem !important; padding-bottom: 0.75rem !important; }
+html.compact .py-4 { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; }
+html.compact .py-3 { padding-top: 0.375rem !important; padding-bottom: 0.375rem !important; }
+html.compact .gap-6 { gap: 1rem !important; }
+html.compact .gap-5 { gap: 0.75rem !important; }
+html.compact .gap-4 { gap: 0.625rem !important; }
