@@ -192,49 +192,41 @@ sequenceDiagram
     actor UserB
     participant FA as Frontend A
     participant FB as Frontend B
-    participant API as FastAPI
-    participant Sec as utils/security
+    participant Backend
+    participant DB as Database
     participant WS as WebSocket Manager
-    participant Notif as notification_controller
-    participant DB as Neon PostgreSQL
 
-    Note over FA,API: Establish WS connections (auth via query token)
+    Note over FA,Backend: Establish WS connections (auth via query token)
 
-    UserA->>+FA: Open chat
-    FA->>+API: WS /ws/friends/{id}?token=JWT
-    API->>+Sec: jwt.decode(token)
+    UserA->>FA: Open chat
+    FA->>+Backend: WS /ws/friends/{id}?token=JWT
+    Backend->>Backend: Decode + verify JWT
     alt Invalid token
-        Sec-->>API: JWTError
-        API-->>FA: close(1008)
+        Backend-->>FA: close(1008)
     else Valid
-        Sec-->>-API: payload
-        API->>WS: register socket in friend_rooms[id]
-        API-->>-FA: accepted
+        Backend->>WS: register socket in friend_room
+        Backend-->>-FA: accepted
     end
-    deactivate FA
 
     UserB->>FB: Open chat
-    FB->>API: WS /ws/friends/{id}?token=JWT
-    API->>WS: register socket in friend_rooms[id]
+    FB->>Backend: WS /ws/friends/{id}?token=JWT
+    Backend->>WS: register socket in friend_room
 
     Note over FA,WS: Real-time message exchange
 
     UserA->>FA: Type message + send
-    FA->>+API: POST /friends/{id}/messages (Bearer token)
-    API->>+Sec: get_current_user(token)
-    Sec-->>-API: payload
-    API->>+DB: INSERT FriendMessage
-    DB-->>-API: row
-    API->>+WS: broadcast_friend(id, payload)
+    FA->>+Backend: POST /friends/{id}/messages (Bearer token)
+    Backend->>Backend: Authenticate
+    Backend->>+DB: INSERT FriendMessage + Notification (for B)
+    DB-->>-Backend: rows
+    Backend->>+WS: broadcast to friend_room
     par Broadcast to all connected sockets
         WS-->>FA: message frame
     and
         WS-->>FB: message frame
     end
-    WS-->>-API: done
-    API->>+Notif: push("New Message", to=B)
-    Notif-->>-API: ok
-    API-->>-FA: FriendMessageOut
+    WS-->>-Backend: done
+    Backend-->>-FA: FriendMessageOut
 ```
 
 ### Sequence Diagram — Discussion Post, Vote & AI Summary
@@ -243,58 +235,48 @@ sequenceDiagram
 sequenceDiagram
     actor Student
     participant Frontend
-    participant API as FastAPI
-    participant Sec as utils/security
-    participant Disc as discussion_controller
+    participant Backend
+    participant DB as Database
     participant Gemini
-    participant DB as Neon PostgreSQL
 
     Student->>Frontend: Submit comment
-    Frontend->>+API: POST /discussions/subsections/{id}
-    API->>+Sec: get_current_user(token)
-    Sec-->>-API: payload
-    API->>+Disc: create_post(content)
-    Disc->>+DB: INSERT DiscussionPost
-    DB-->>-Disc: row
-    Disc-->>-API: DiscussionPostOut
-    API-->>-Frontend: 201 post
+    Frontend->>+Backend: POST /discussions/subsections/{id}
+    Backend->>Backend: Authenticate
+    Backend->>+DB: INSERT DiscussionPost
+    DB-->>-Backend: row
+    Backend-->>-Frontend: 201 post
 
-    Note over Student,API: Upvote toggle (idempotent)
+    Note over Student,Backend: Upvote toggle (idempotent)
 
     Student->>Frontend: Click upvote
-    Frontend->>+API: POST /discussions/{post_id}/vote
-    API->>+Disc: toggle_vote(post_id, user_id)
-    Disc->>+DB: SELECT existing DiscussionVote
-    DB-->>-Disc: result
+    Frontend->>+Backend: POST /discussions/{post_id}/vote
+    Backend->>+DB: SELECT existing DiscussionVote
+    DB-->>-Backend: result
     alt Already voted
-        Disc->>+DB: DELETE vote
-        DB-->>-Disc: ok
-        Disc->>Disc: Self: decrement upvote_count
+        Backend->>+DB: DELETE vote
+        DB-->>-Backend: ok
+        Backend->>Backend: Decrement upvote_count
     else Not voted yet
-        Disc->>+DB: INSERT vote (UNIQUE post_id, user_id)
-        DB-->>-Disc: ok
-        Disc->>Disc: Self: increment upvote_count
+        Backend->>+DB: INSERT vote (UNIQUE post_id, user_id)
+        DB-->>-Backend: ok
+        Backend->>Backend: Increment upvote_count
     end
-    Disc-->>-API: DiscussionVoteOut
-    API-->>-Frontend: result
+    Backend-->>-Frontend: DiscussionVoteOut
 
-    Note over Student,API: Generate AI summary of the thread
+    Note over Student,Backend: Generate AI summary of the thread
 
     Student->>Frontend: Click "Summarize"
-    Frontend->>+API: POST /discussions/subsections/{id}/summary/regenerate
-    API->>+Disc: regenerate_summary(subsection_id)
-    Disc->>+DB: SELECT all posts in thread
-    DB-->>-Disc: posts
+    Frontend->>+Backend: POST /discussions/subsections/{id}/summary/regenerate
+    Backend->>+DB: SELECT all posts in thread
+    DB-->>-Backend: posts
     alt Not enough posts
-        Disc-->>API: 400 Need more posts
-        API-->>Frontend: 400 error
+        Backend-->>Frontend: 400 Need more posts
     else Enough posts
-        Disc->>+Gemini: prompt(thread → markdown)
-        Gemini-->>-Disc: summary_md
-        Disc->>+DB: UPSERT DiscussionSummary
-        DB-->>-Disc: ok
-        Disc-->>-API: DiscussionSummaryOut
-        API-->>-Frontend: summary
+        Backend->>+Gemini: Prompt(thread → markdown)
+        Gemini-->>-Backend: summary_md
+        Backend->>+DB: UPSERT DiscussionSummary
+        DB-->>-Backend: ok
+        Backend-->>-Frontend: DiscussionSummaryOut
     end
 ```
 

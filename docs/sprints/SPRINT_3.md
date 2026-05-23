@@ -125,33 +125,28 @@ graph LR
 sequenceDiagram
     actor Student
     participant Frontend
-    participant API as FastAPI
-    participant Sec as utils/security
-    participant RAG as utils/rag
+    participant Backend
+    participant DB as Database
     participant Pinecone
     participant Gemini
-    participant DB as Neon PostgreSQL
 
     Student->>Frontend: Type question in tutor panel
-    Frontend->>+API: POST /ai/chat (Bearer token)
-    API->>+Sec: get_current_user(token)
-    Sec-->>-API: payload
-    API->>+DB: SELECT course by id
-    DB-->>-API: course row
+    Frontend->>+Backend: POST /ai/chat (Bearer token)
+    Backend->>Backend: Authenticate (JWT decode)
+    Backend->>+DB: SELECT course by id
+    DB-->>-Backend: course row
     alt Course not found
-        API-->>Frontend: 404 Not found
+        Backend-->>Frontend: 404 Not found
     else Course exists
-        API->>+RAG: search_course(course_id, message)
-        RAG->>RAG: Self: embed query (768-dim via Gemini)
-        RAG->>+Pinecone: Query top-K vectors (score ≥ 0.40)
-        Pinecone-->>-RAG: matched chunks
-        RAG-->>-API: context chunks
+        Backend->>Backend: Embed query (768-dim)
+        Backend->>+Pinecone: Query top-K vectors (score ≥ 0.40)
+        Pinecone-->>-Backend: matched chunks
         opt No chunks AND DB has text content
-            API->>RAG: kick off background re-index (self-heal)
+            Backend->>Backend: Kick off background re-index (self-heal)
         end
-        API->>+Gemini: chat_with_context(course, chunks, history, q)
-        Gemini-->>-API: grounded answer
-        API-->>-Frontend: { reply }
+        Backend->>+Gemini: chat_with_context(chunks, history, question)
+        Gemini-->>-Backend: grounded answer
+        Backend-->>-Frontend: { reply }
     end
 ```
 
@@ -161,53 +156,47 @@ sequenceDiagram
 sequenceDiagram
     actor Professor
     participant Frontend
-    participant API as FastAPI
-    participant Sec as utils/security
-    participant CGen as course_generation_controller
-    participant PDF as utils/pdf_parser
+    participant Backend
+    participant DB as Database
     participant Gemini
-    participant DB as Neon PostgreSQL
 
     Professor->>Frontend: Upload PDF + difficulty
-    Frontend->>+API: POST /course-gen/upload
-    API->>+Sec: require_role("professor")
-    Sec-->>-API: ok
+    Frontend->>+Backend: POST /course-gen/upload
+    Backend->>Backend: Authenticate + require_role("professor")
     alt File not PDF OR > 20 MB
-        API-->>Frontend: 400 / 413 error
+        Backend-->>Frontend: 400 / 413 error
     else Valid
-        API->>+DB: INSERT GeneratedCourse(status='processing')
-        DB-->>-API: job row
-        API-->>-Frontend: 202 { job_id }
-        Note over API,Gemini: BackgroundTasks — async pipeline
-        API->>+CGen: run_pipeline(job_id, pdf_bytes)
-        CGen->>+PDF: parse_pdf(bytes)
-        PDF-->>-CGen: chunks with line metadata
-        CGen->>+Gemini: outline prompt (assign chunks to sections)
-        Gemini-->>-CGen: JSON outline
-        CGen->>CGen: Self: render verbatim HTML per subsection
-        CGen->>+DB: UPDATE job(status='completed', result=JSON)
-        DB-->>-CGen: ok
-        deactivate CGen
+        Backend->>+DB: INSERT GeneratedCourse(status='processing')
+        DB-->>-Backend: job row
+        Backend-->>-Frontend: 202 { job_id }
+
+        Note over Backend,Gemini: BackgroundTasks — async pipeline
+        Backend->>Backend: Parse PDF into chunks
+        Backend->>+Gemini: Outline prompt (assign chunks to sections)
+        Gemini-->>-Backend: JSON outline
+        Backend->>Backend: Render verbatim HTML per subsection
+        Backend->>+DB: UPDATE job(status='completed', result=JSON)
+        DB-->>-Backend: ok
     end
 
-    Note over Frontend,API: Polling for completion
+    Note over Frontend,Backend: Polling for completion
 
     loop Every few seconds
-        Frontend->>+API: GET /course-gen/{job_id}
-        API->>+DB: SELECT job
-        DB-->>-API: job row
-        API-->>-Frontend: status
+        Frontend->>+Backend: GET /course-gen/{job_id}
+        Backend->>+DB: SELECT job
+        DB-->>-Backend: job row
+        Backend-->>-Frontend: status
         alt status == "completed"
             Note right of Frontend: Stop polling
         end
     end
 
     Professor->>Frontend: Review + click Import
-    Frontend->>+API: POST /course-gen/{job_id}/import/{course_id}
-    API->>+DB: INSERT Course + Sections + Subsections + Blocks
-    DB-->>-API: rows
-    API->>API: Self: synchronous RAG re-index
-    API-->>-Frontend: { sections_created, lessons_created }
+    Frontend->>+Backend: POST /course-gen/{job_id}/import/{course_id}
+    Backend->>+DB: INSERT Course + Sections + Subsections + Blocks
+    DB-->>-Backend: rows
+    Backend->>Backend: Synchronous RAG re-index
+    Backend-->>-Frontend: { sections_created, lessons_created }
 ```
 
 ---

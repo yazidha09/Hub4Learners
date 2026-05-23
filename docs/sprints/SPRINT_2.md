@@ -159,43 +159,38 @@ graph LR
 sequenceDiagram
     actor Professor
     participant Frontend
-    participant API as FastAPI
-    participant Sec as utils/security
-    participant FS as File Storage
-    participant DB as Neon PostgreSQL
+    participant Backend
+    participant DB as Database
 
     Professor->>Frontend: Fill course form + pick thumbnail
-    Frontend->>+API: POST /courses (multipart)
-    API->>+Sec: require_role("professor")
+    Frontend->>+Backend: POST /courses (multipart, Bearer token)
+    Backend->>Backend: Authenticate + require_role("professor")
     alt Not a professor
-        Sec-->>API: raise 403
-        API-->>Frontend: 403 Forbidden
+        Backend-->>Frontend: 403 Forbidden
     else Authorised
-        Sec-->>-API: ok
         opt Thumbnail uploaded
-            API->>+FS: Save file to /uploads/thumbnails
-            FS-->>-API: stored filename
+            Backend->>Backend: Save file to /uploads/thumbnails
         end
-        API->>+DB: INSERT Course (is_published=false)
-        DB-->>-API: course row
-        API-->>-Frontend: 201 CourseOut
+        Backend->>+DB: INSERT Course (is_published=false)
+        DB-->>-Backend: course row
+        Backend-->>-Frontend: 201 CourseOut
     end
 
     loop For each section, subsection, block
         Professor->>Frontend: Add content
-        Frontend->>+API: POST /sections | /subsections | /blocks
-        API->>API: Verify ownership (course.professor_id == user)
-        API->>+DB: INSERT row(s)
-        DB-->>-API: rows
-        API-->>-Frontend: created resource
+        Frontend->>+Backend: POST /sections | /subsections | /blocks
+        Backend->>Backend: Verify ownership
+        Backend->>+DB: INSERT row(s)
+        DB-->>-Backend: rows
+        Backend-->>-Frontend: created resource
     end
 
     Professor->>Frontend: Click Publish
-    Frontend->>+API: PATCH /courses/{id}/publish
-    API->>+DB: UPDATE is_published = NOT is_published
-    DB-->>-API: updated row
-    API->>API: Self: trigger background re-index for RAG
-    API-->>-Frontend: CourseOut(is_published=true)
+    Frontend->>+Backend: PATCH /courses/{id}/publish
+    Backend->>+DB: UPDATE is_published = true
+    DB-->>-Backend: updated row
+    Backend->>Backend: Trigger background re-index for RAG
+    Backend-->>-Frontend: CourseOut(is_published=true)
 ```
 
 ### Sequence Diagram — Enrollment & Progress Tracking
@@ -204,48 +199,43 @@ sequenceDiagram
 sequenceDiagram
     actor Student
     participant Frontend
-    participant API as FastAPI
-    participant Sec as utils/security
-    participant Notif as notification_controller
-    participant DB as Neon PostgreSQL
+    participant Backend
+    participant DB as Database
 
     Student->>Frontend: Click Enroll on a course
-    Frontend->>+API: POST /courses/{id}/enroll (Bearer token)
-    API->>+Sec: get_current_user(token)
-    Sec-->>-API: payload {sub}
-    API->>+DB: SELECT existing Enrollment(student, course)
-    DB-->>-API: result
+    Frontend->>+Backend: POST /courses/{id}/enroll (Bearer token)
+    Backend->>Backend: Authenticate (JWT decode)
+    Backend->>+DB: SELECT existing Enrollment
+    DB-->>-Backend: result
     alt Already enrolled
-        API-->>Frontend: 409 Conflict
+        Backend-->>Frontend: 409 Conflict
     else Course not free
-        API-->>Frontend: 402 Use Stripe checkout
+        Backend-->>Frontend: 402 Use Stripe checkout
     else Otherwise
-        API->>+DB: INSERT Enrollment(status='active')
-        DB-->>-API: enrollment row
-        API->>+Notif: push("New Enrollment", to=professor)
-        Notif-->>-API: ok
-        API-->>-Frontend: 201 EnrollmentOut
+        Backend->>+DB: INSERT Enrollment(status='active')
+        DB-->>-Backend: enrollment row
+        Backend->>Backend: Push notification to professor
+        Backend-->>-Frontend: 201 EnrollmentOut
     end
 
-    Note over Student,API: Later — learning the course
+    Note over Student,Backend: Later — learning the course
 
     Student->>Frontend: Mark subsection as done
-    Frontend->>+API: POST /courses/{id}/progress
-    API->>+DB: Was this item already completed?
-    DB-->>-API: result
+    Frontend->>+Backend: POST /courses/{id}/progress
+    Backend->>+DB: Was this item already completed?
+    DB-->>-Backend: result
     alt First completion
-        API->>+DB: INSERT CourseProgress
-        DB-->>-API: row
-        API->>API: Self: recompute progress_pct
-        opt progress_pct reached 100%
-            API->>API: Self: mark course completed
-            API->>+Notif: push("Course completed", to=student)
-            Notif-->>-API: ok
+        Backend->>+DB: INSERT CourseProgress
+        DB-->>-Backend: row
+        Backend->>Backend: Recompute progress %
+        opt Progress reached 100%
+            Backend->>Backend: Mark course completed
+            Backend->>Backend: Push "Course completed" notification
         end
     else Already completed
-        API->>API: Skip insert (idempotent)
+        Backend->>Backend: Skip insert (idempotent)
     end
-    API-->>-Frontend: CourseProgressOut
+    Backend-->>-Frontend: CourseProgressOut
 ```
 
 ---

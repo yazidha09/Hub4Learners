@@ -90,28 +90,24 @@ graph LR
 sequenceDiagram
     actor Visitor
     participant Frontend
-    participant API as FastAPI
-    participant Sec as utils/security
-    participant DB as Neon PostgreSQL
+    participant Backend
+    participant DB as Database
 
     Visitor->>Frontend: Fill register form
     Frontend->>Frontend: Client-side validation
-    Frontend->>+API: POST /auth/register
-    API->>API: Validate schema (Pydantic)
-    API->>+DB: SELECT user WHERE email = ?
-    DB-->>-API: result
+    Frontend->>+Backend: POST /auth/register
+    Backend->>+DB: SELECT user WHERE email = ?
+    DB-->>-Backend: result
     alt Email already exists
-        API-->>Frontend: 409 Conflict
+        Backend-->>Frontend: 409 Conflict
         Frontend-->>Visitor: Show "email taken" error
     else Email is free
-        API->>+Sec: hash_password(password)
-        Sec-->>-API: bcrypt hash
-        API->>+DB: INSERT user (role, password_hash, ...)
-        DB-->>-API: user row
-        API->>+Sec: create_access_token({sub, role})
-        Sec-->>-API: JWT (HS256, exp=60min)
-        API-->>-Frontend: 201 { access_token }
-        Frontend->>Frontend: localStorage.setItem("h4l_token")
+        Backend->>Backend: Hash password (bcrypt)
+        Backend->>+DB: INSERT user (role, password_hash)
+        DB-->>-Backend: user row
+        Backend->>Backend: Sign JWT (HS256, 60-min)
+        Backend-->>-Frontend: 201 { access_token }
+        Frontend->>Frontend: Save token in localStorage
         Frontend-->>Visitor: Redirect to /dashboard
     end
 ```
@@ -122,40 +118,34 @@ sequenceDiagram
 sequenceDiagram
     actor User
     participant Frontend
-    participant API as FastAPI
-    participant Sec as utils/security
-    participant DB as Neon PostgreSQL
+    participant Backend
+    participant DB as Database
 
     User->>Frontend: Submit credentials
-    Frontend->>+API: POST /auth/login
-    API->>+DB: SELECT user WHERE email = ?
-    DB-->>-API: user row (or null)
-    alt User not found OR password mismatch
-        API->>+Sec: verify_password(plain, hash)
-        Sec-->>-API: false
-        API-->>Frontend: 401 Invalid credentials
-    else Credentials valid
-        API->>+Sec: create_access_token({sub, role, university_id})
-        Sec-->>-API: JWT
-        API-->>-Frontend: 200 { access_token, token_type }
+    Frontend->>+Backend: POST /auth/login
+    Backend->>+DB: SELECT user WHERE email = ?
+    DB-->>-Backend: user row (or null)
+    Backend->>Backend: verify_password(plain, hash)
+    alt Invalid credentials
+        Backend-->>Frontend: 401 Invalid credentials
+    else Valid
+        Backend->>Backend: Sign JWT (sub, role)
+        Backend-->>-Frontend: 200 { access_token }
         Frontend->>Frontend: Save token & set AuthContext
     end
 
-    Note over Frontend,API: Subsequent authenticated request
+    Note over Frontend,Backend: Subsequent authenticated request
 
     User->>Frontend: Open protected page
-    Frontend->>+API: GET /auth/me (Bearer token)
-    API->>+Sec: get_current_user(token)
-    Sec->>Sec: Decode JWT + verify signature
+    Frontend->>+Backend: GET /auth/me (Bearer token)
+    Backend->>Backend: Decode + verify JWT
     alt Token invalid or expired
-        Sec-->>API: raise 401
-        API-->>Frontend: 401 Unauthorized
+        Backend-->>Frontend: 401 Unauthorized
         Frontend->>Frontend: Clear token + redirect to /login
     else Token valid
-        Sec-->>-API: payload {sub, role}
-        API->>+DB: SELECT user by sub
-        DB-->>-API: user row
-        API-->>-Frontend: UserOut
+        Backend->>+DB: SELECT user by sub
+        DB-->>-Backend: user row
+        Backend-->>-Frontend: UserOut
     end
 ```
 

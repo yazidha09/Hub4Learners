@@ -159,38 +159,36 @@ graph LR
 
 ```mermaid
 sequenceDiagram
-    participant Source as Course / Quiz route
-    participant XP as xp_service
-    participant Lvl as utils/leveling
-    participant Ach as achievements_service
-    participant DB as Neon PostgreSQL
+    actor Learner
+    participant Frontend
+    participant Backend
+    participant DB as Database
 
-    Source->>+XP: award_xp(user, source_type, source_id, amount?)
-    XP->>+DB: SELECT or INSERT UserGamification
-    DB-->>-XP: state
-    XP->>+DB: SUM XP gained today
-    DB-->>-XP: today_total
-    alt today_total + amount > DAILY_XP_CAP
-        XP-->>Source: 0 (daily cap reached)
-    else source ∈ ONE_SHOT_SOURCES AND already awarded
-        XP-->>Source: 0 (duplicate artifact)
-    else source ∈ COOLDOWN_SECONDS AND within window
-        XP-->>Source: 0 (cooling down)
+    Learner->>Frontend: Complete a lesson / pass a quiz
+    Frontend->>+Backend: Triggering request (Bearer token)
+    Backend->>Backend: Authenticate
+    Backend->>+DB: SELECT XP state + today's total
+    DB-->>-Backend: state
+    alt Today + amount > DAILY_XP_CAP
+        Backend-->>Frontend: result (xp=0, capped)
+    else Already awarded for this artifact
+        Backend-->>Frontend: result (xp=0, duplicate)
+    else Within cooldown window
+        Backend-->>Frontend: result (xp=0, cooldown)
     else Award allowed
-        XP->>+DB: INSERT XPLog
-        DB-->>-XP: log row
-        XP->>+DB: UPDATE total_xp
-        DB-->>-XP: ok
-        XP->>+Lvl: calculate_level_from_xp(total)
-        Lvl-->>-XP: new_level
-        opt new_level > previous_level
-            XP->>+DB: UPDATE level
-            DB-->>-XP: ok
+        Backend->>+DB: INSERT XPLog + UPDATE total_xp
+        DB-->>-Backend: ok
+        Backend->>Backend: Recompute level + streak
+        opt Level up
+            Backend->>+DB: UPDATE level
+            DB-->>-Backend: ok
         end
-        XP->>XP: Self: update streak (if applicable)
-        XP->>+Ach: check achievement & badge triggers
-        Ach-->>-XP: newly unlocked
-        XP-->>-Source: XPGainOut { amount, level_up, new_unlocks }
+        Backend->>Backend: Check achievement & badge triggers
+        opt New unlocks
+            Backend->>+DB: INSERT UserAchievement / UserBadge
+            DB-->>-Backend: ok
+        end
+        Backend-->>-Frontend: XPGainOut { amount, level_up, unlocks }
     end
 ```
 
@@ -200,48 +198,41 @@ sequenceDiagram
 sequenceDiagram
     actor UserA
     actor UserB
-    participant API as FastAPI
-    participant Sec as utils/security
-    participant Notif as notification_controller
+    participant Frontend
+    participant Backend
+    participant DB as Database
     participant WS as WebSocket Manager
-    participant DB as Neon PostgreSQL
 
-    UserA->>+API: POST /friends/request (Bearer token)
-    API->>+Sec: get_current_user(token)
-    Sec-->>-API: payload
-    API->>+DB: SELECT existing Friendship(A, B)
-    DB-->>-API: result
+    UserA->>Frontend: Send friend request to B
+    Frontend->>+Backend: POST /friends/request (Bearer token)
+    Backend->>Backend: Authenticate
+    Backend->>+DB: SELECT existing Friendship(A, B)
+    DB-->>-Backend: result
     alt Already friends or pending
-        API-->>Frontend: 409 Conflict
+        Backend-->>Frontend: 409 Conflict
     else New request
-        API->>+DB: INSERT Friendship(status='pending')
-        DB-->>-API: row
-        API->>+Notif: push("Friend Request", to=B)
-        Notif->>+DB: INSERT Notification
-        DB-->>-Notif: ok
-        Notif->>+WS: broadcast to user_rooms[B]
-        WS-->>-Notif: delivered
-        Notif-->>-API: ok
-        API-->>-UserA: FriendRequestOut
+        Backend->>+DB: INSERT Friendship(status='pending') + Notification
+        DB-->>-Backend: rows
+        Backend->>+WS: broadcast to B's user_room
+        WS-->>-Backend: delivered (if online)
+        Backend-->>-Frontend: FriendRequestOut
     end
 
-    Note over UserB,API: B reviews the request
+    Note over UserB,Backend: B reviews the request
 
-    UserB->>+API: PUT /friends/requests/{id}/review {action}
-    API->>+Sec: get_current_user(token)
-    Sec-->>-API: payload
+    UserB->>Frontend: Accept or decline
+    Frontend->>+Backend: PUT /friends/requests/{id}/review {action}
+    Backend->>Backend: Authenticate
     alt action == "accept"
-        API->>+DB: UPDATE Friendship status='accepted', reviewed_at=now
-        DB-->>-API: row
-        API->>+Notif: push("Request Accepted", to=A)
-        Notif-->>-API: ok
+        Backend->>+DB: UPDATE Friendship='accepted' + INSERT Notification
+        DB-->>-Backend: rows
     else action == "decline"
-        API->>+DB: UPDATE Friendship status='declined'
-        DB-->>-API: row
-        API->>+Notif: push("Request Declined", to=A)
-        Notif-->>-API: ok
+        Backend->>+DB: UPDATE Friendship='declined' + INSERT Notification
+        DB-->>-Backend: rows
     end
-    API-->>-UserB: FriendRequestOut
+    Backend->>+WS: broadcast to A's user_room
+    WS-->>-Backend: delivered
+    Backend-->>-Frontend: FriendRequestOut
 ```
 
 ---

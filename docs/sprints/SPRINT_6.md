@@ -179,55 +179,45 @@ graph LR
 sequenceDiagram
     actor Student
     participant Frontend
-    participant API as FastAPI
-    participant Sec as utils/security
-    participant Pay as payment_controller
+    participant Backend
+    participant DB as Database
     participant Stripe
-    participant Notif as notification_controller
-    participant DB as Neon PostgreSQL
 
     Student->>Frontend: Click "Buy course"
-    Frontend->>+API: POST /payments/checkout/{course_id}
-    API->>+Sec: get_current_user(token)
-    Sec-->>-API: payload
-    API->>+Pay: create_checkout_session()
-    Pay->>+DB: SELECT course + check enrollment
-    DB-->>-Pay: course row + existing enrollment
+    Frontend->>+Backend: POST /payments/checkout/{course_id}
+    Backend->>Backend: Authenticate
+    Backend->>+DB: SELECT course + check enrollment
+    DB-->>-Backend: course + enrollment status
     alt Course is free
-        Pay-->>API: 400 Enroll directly
+        Backend-->>Frontend: 400 Enroll directly
     else Owns the course
-        Pay-->>API: 400 Cannot buy own course
+        Backend-->>Frontend: 400 Cannot buy own course
     else Already enrolled
-        Pay-->>API: 409 Already enrolled
+        Backend-->>Frontend: 409 Already enrolled
     else Eligible
-        Pay->>+Stripe: Session.create(metadata={course, student})
-        Stripe-->>-Pay: { id, url }
-        Pay-->>-API: { session_id, url }
-        API-->>-Frontend: redirect URL
+        Backend->>+Stripe: Session.create(metadata={course, student})
+        Stripe-->>-Backend: { id, url }
+        Backend-->>-Frontend: redirect URL
     end
 
     Frontend-->>Student: Redirect to Stripe hosted page
     Student->>Stripe: Enter card + pay
     Stripe-->>Student: Redirect /payment/success?session_id=…
 
-    Note over Frontend,API: Frontend-driven confirmation (no webhook)
+    Note over Frontend,Backend: Frontend-driven confirmation (no webhook)
 
-    Frontend->>+API: POST /payments/confirm { session_id }
-    API->>+Pay: confirm_session()
-    Pay->>+Stripe: Session.retrieve(session_id)
-    Stripe-->>-Pay: session(payment_status, metadata)
+    Frontend->>+Backend: POST /payments/confirm { session_id }
+    Backend->>+Stripe: Session.retrieve(session_id)
+    Stripe-->>-Backend: session(payment_status, metadata)
     alt payment_status != "paid"
-        Pay-->>API: 402 Payment not completed
-    else metadata.student_id != current_user
-        Pay-->>API: 403 Session not yours
+        Backend-->>Frontend: 402 Payment not completed
+    else Session not yours
+        Backend-->>Frontend: 403 Forbidden
     else Valid
-        Pay->>+DB: INSERT Enrollment(status='active')
-        DB-->>-Pay: row
-        Pay->>+Notif: push("New Paid Enrollment", to=professor)
-        Notif-->>-Pay: ok
-        Pay-->>-API: EnrollmentOut
+        Backend->>+DB: INSERT Enrollment(status='active') + Notification (to professor)
+        DB-->>-Backend: rows
+        Backend-->>-Frontend: EnrollmentOut
     end
-    API-->>-Frontend: result
 ```
 
 ### Sequence Diagram — Professor Join Request Flow
@@ -236,51 +226,42 @@ sequenceDiagram
 sequenceDiagram
     actor Professor
     actor UniAdmin as University Admin
-    participant API as FastAPI
-    participant Sec as utils/security
-    participant Org as org_controller
-    participant Notif as notification_controller
-    participant DB as Neon PostgreSQL
+    participant Frontend
+    participant Backend
+    participant DB as Database
 
-    Professor->>+API: POST /org/join-requests {university_id}
-    API->>+Sec: require_role("professor")
-    Sec-->>-API: ok
-    API->>+Org: submit_join_request()
-    Org->>+DB: SELECT existing pending request
-    DB-->>-Org: result
+    Professor->>Frontend: Pick university + submit
+    Frontend->>+Backend: POST /org/join-requests
+    Backend->>Backend: Authenticate + require_role("professor")
+    Backend->>+DB: SELECT existing pending request
+    DB-->>-Backend: result
     alt Already pending
-        Org-->>API: 409 Request already exists
+        Backend-->>Frontend: 409 Request already exists
     else New
-        Org->>+DB: INSERT UniversityJoinRequest(status='pending')
-        DB-->>-Org: row
-        Org-->>-API: JoinRequestOut
+        Backend->>+DB: INSERT UniversityJoinRequest(status='pending')
+        DB-->>-Backend: row
+        Backend-->>-Frontend: JoinRequestOut
     end
-    API-->>-Professor: result
 
-    Note over UniAdmin,API: Admin reviews requests
+    Note over UniAdmin,Backend: Admin reviews requests
 
-    UniAdmin->>+API: GET /org/join-requests
-    API->>+Org: list_join_requests(scope=university)
-    Org->>+DB: SELECT pending for my university
-    DB-->>-Org: rows
-    Org-->>-API: list
-    API-->>-UniAdmin: pending requests
+    UniAdmin->>Frontend: Open pending requests
+    Frontend->>+Backend: GET /org/join-requests
+    Backend->>+DB: SELECT pending for my university
+    DB-->>-Backend: rows
+    Backend-->>-Frontend: list
 
-    UniAdmin->>+API: PUT /org/join-requests/{id}/review {action}
-    API->>+Sec: require_role("university_admin")
-    Sec-->>-API: ok
+    UniAdmin->>Frontend: Approve or reject
+    Frontend->>+Backend: PUT /org/join-requests/{id}/review {action}
+    Backend->>Backend: Authenticate + require_role("university_admin")
     alt action == "approve"
-        API->>+DB: UPDATE request status='approved', set user.university_id
-        DB-->>-API: ok
-        API->>+Notif: push("Join Approved", to=professor)
-        Notif-->>-API: ok
+        Backend->>+DB: UPDATE request='approved' + SET user.university_id + INSERT Notification
+        DB-->>-Backend: rows
     else action == "reject"
-        API->>+DB: UPDATE request status='rejected'
-        DB-->>-API: ok
-        API->>+Notif: push("Join Rejected", to=professor)
-        Notif-->>-API: ok
+        Backend->>+DB: UPDATE request='rejected' + INSERT Notification
+        DB-->>-Backend: rows
     end
-    API-->>-UniAdmin: JoinRequestOut
+    Backend-->>-Frontend: JoinRequestOut
 ```
 
 ### Sequence Diagram — University Announcement Broadcast
@@ -288,33 +269,30 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     actor Admin as University Admin
-    participant API as FastAPI
-    participant Sec as utils/security
-    participant Notif as notification_controller
+    participant Frontend
+    participant Backend
+    participant DB as Database
     participant WS as WebSocket Manager
-    participant DB as Neon PostgreSQL
 
-    Admin->>+API: POST /announcements {title, body}
-    API->>+Sec: require_role("university_admin")
-    Sec-->>-API: ok
+    Admin->>Frontend: Compose announcement
+    Frontend->>+Backend: POST /announcements {title, body}
+    Backend->>Backend: Authenticate + require_role("university_admin")
     alt Admin not assigned to a university
-        API-->>Admin: 400 No university scope
+        Backend-->>Frontend: 400 No university scope
     else Authorised
-        API->>+DB: INSERT Announcement(university_id, created_by)
-        DB-->>-API: row
-        API->>+DB: SELECT users WHERE university_id = ?
-        DB-->>-API: recipient list
+        Backend->>+DB: INSERT Announcement
+        DB-->>-Backend: row
+        Backend->>+DB: SELECT users in university
+        DB-->>-Backend: recipient list
 
         loop For each recipient
-            API->>+Notif: push("Announcement", title, body)
-            Notif->>+DB: INSERT Notification
-            DB-->>-Notif: ok
-            Notif->>+WS: broadcast to user_rooms[user_id]
-            WS-->>-Notif: delivered (if online)
-            Notif-->>-API: ok
+            Backend->>+DB: INSERT Notification
+            DB-->>-Backend: ok
+            Backend->>+WS: broadcast to user_room
+            WS-->>-Backend: delivered (if online)
         end
 
-        API-->>-Admin: AnnouncementOut(recipient_count)
+        Backend-->>-Frontend: AnnouncementOut(recipient_count)
     end
 ```
 
