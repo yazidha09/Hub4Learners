@@ -310,6 +310,16 @@ sequenceDiagram
 
 ---
 
+## Sprint Review
+
+| Topic | Outcome |
+|---|---|
+| Review | Demonstrated Stripe-driven paid enrollment, the three analytics surfaces (course, learner, student), the admin panel (users, courses, role changes), the professor-to-university join request flow, and university-scoped announcements. All user stories met their Definition of Done. |
+| Went well | Confirming Stripe sessions from the frontend on return (rather than via a webhook) simplified the deployment setup and removed the need for a public webhook endpoint while still verifying `payment_status == "paid"` against Stripe directly. |
+| To improve | Refunds and disputes are not yet handled. A Stripe webhook listener should still be added later for asynchronous events (refunds, chargebacks, payment failures after redirect), even if it's not on the happy-path checkout flow. |
+
+---
+
 ## Conclusion
 
 Sprint 6 closes the project. Stripe brings monetisation, the three analytics surfaces give every persona meaningful feedback on the platform's value, and the admin layer ensures Hub4Learners can be operated at scale. With this sprint complete, the platform delivers the full vision laid out in the initial planning phase.

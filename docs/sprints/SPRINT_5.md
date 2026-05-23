@@ -291,6 +291,16 @@ sequenceDiagram
 
 ---
 
+## Sprint Review
+
+| Topic | Outcome |
+|---|---|
+| Review | Demonstrated the three communication channels — per-lesson discussions, friend chat with media, and student/professor chat requests — plus the unified notification system and university-scoped announcements. All user stories met their Definition of Done. |
+| Went well | Reusing a single WebSocket manager across three room types (notifications, chat requests, friendships) kept the real-time layer simple, and the JWT-on-query-string authentication on every socket made connection handling consistent. |
+| To improve | When a recipient is offline, WebSocket broadcasts are silently dropped — only the database notification persists. A proper offline-delivery story (push or polling fallback on reconnect) should be planned next. |
+
+---
+
 ## Conclusion
 
 Sprint 5 turns the platform into a community. WebSocket-driven messaging keeps conversations alive in real time, discussions add a learning-focused forum to each lesson, and the unified notification system makes sure no important event is missed. With Sprint 6 left, only monetisation and administration remain.

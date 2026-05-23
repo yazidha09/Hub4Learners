@@ -244,6 +244,16 @@ sequenceDiagram
 
 ---
 
+## Sprint Review
+
+| Topic | Outcome |
+|---|---|
+| Review | Demonstrated the full gamification loop (XP, levels, streaks, achievements, badges, leaderboards) for both learners and professors, plus the friend graph with search, requests and unfriend. All user stories met their Definition of Done. |
+| Went well | Centralising every grant through a single `award_xp` function with one-shot, cooldown and daily-cap guards made the XP economy trustworthy from day one and kept the audit log clean. |
+| To improve | The achievement and badge unlock rules are still hard-coded inside the service. Externalising them into the database (or a config file) would make tuning and adding new achievements easier without code changes. |
+
+---
+
 ## Conclusion
 
 Sprint 4 closes the engagement loop. Every learning action gives meaningful feedback through XP, levels, streaks and unlocks, and the friend graph turns Hub4Learners into a social space where learners can motivate each other. The anti-cheat layer keeps progression fair and the data trustworthy.

@@ -209,6 +209,16 @@ sequenceDiagram
 
 ---
 
+## Sprint Review
+
+| Topic | Outcome |
+|---|---|
+| Review | Demonstrated the AI Tutor with RAG-grounded answers, MCQ generation and scoring, the on-demand course summary, and the full PDF-to-course pipeline including review and import. All user stories met their Definition of Done. |
+| Went well | Hooking the Pinecone re-index into natural lifecycle events (publish, text-block edit, AI import) means the AI is always ready without any manual step, and the verbatim-content rule in the PDF generator preserves the professor's wording. |
+| To improve | Quiz quality and difficulty calibration vary noticeably between courses with thin source material. Adding light evaluation prompts or a fallback when chunks are too few should be considered in a follow-up. |
+
+---
+
 ## Conclusion
 
 Sprint 3 transforms Hub4Learners from a static content platform into an interactive learning environment. RAG-grounded answers, automated quizzes, and PDF-driven authoring meaningfully reduce friction for both learners and professors, while keeping AI output anchored to the actual course material.

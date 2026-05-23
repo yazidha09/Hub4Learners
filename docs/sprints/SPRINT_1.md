@@ -161,6 +161,16 @@ sequenceDiagram
 
 ---
 
+## Sprint Review
+
+| Topic | Outcome |
+|---|---|
+| Review | Demonstrated the complete sign-up and sign-in flow with JWT issuance, `/auth/me` token validation, and logout. All user stories met their Definition of Done. |
+| Went well | bcrypt password hashing combined with a clean JWT payload (`sub`, `role`) gave us a reusable security foundation that every later sprint plugged into without modification. |
+| To improve | Refresh tokens were not implemented in this sprint, leaving session continuity dependent on the 60-minute access token. Refresh-token handling should be planned explicitly in a future iteration. |
+
+---
+
 ## Conclusion
 
 Sprint 1 delivers a minimal but solid authentication layer. With JWT-based sessions and a clear role field carried inside every token, every later sprint can rely on a consistent way to identify the caller and enforce role-based access.

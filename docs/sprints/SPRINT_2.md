@@ -250,6 +250,16 @@ sequenceDiagram
 
 ---
 
+## Sprint Review
+
+| Topic | Outcome |
+|---|---|
+| Review | Demonstrated the end-to-end course lifecycle: professor authoring (sections, subsections, blocks, materials, publish) and student journey (browse, enroll, progress tracking, feedback). All user stories met their Definition of Done. |
+| Went well | The four-level content hierarchy (Course → Section → Subsection → LessonBlock) proved flexible enough to host text, image and video uniformly, and the file-storage layout under `/uploads` kept thumbnail and lesson media handling consistent. |
+| To improve | Drag-and-drop reordering of sections and subsections was de-scoped to keep the sprint on schedule. Reorder endpoints and the matching UI should be added in a follow-up. |
+
+---
+
 ## Conclusion
 
 Sprint 2 delivers the end-to-end course lifecycle. The hierarchical Course → Section → Subsection → Block model gives professors flexibility to build rich lessons, while students get a smooth path from discovery to enrollment to completion. This content backbone is what every later sprint — AI, gamification, communication — builds on.
