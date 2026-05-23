@@ -19,7 +19,6 @@ class User(SQLModel, table=True):
     profile_image: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
     is_active: bool = Field(default=True)
     is_verified: bool = Field(sa_column=Column(Boolean, nullable=False, server_default='true'), default=True)
-    auto_refuse_chat: bool = Field(sa_column=Column(Boolean, nullable=False, server_default='false'), default=False)
 
     # Organizational hierarchy — nullable so existing rows and independent users stay valid
     university_id: Optional[UUID] = Field(

@@ -4,11 +4,11 @@
 
 ## Introduction
 
-Sprint 5 turns Hub4Learners into a place where learners and professors actually interact. Three communication channels ship in parallel: lesson-level discussion threads with votes and reports, real-time friend messaging with text and media, and a student-to-professor chat-request flow. A unified notification system keeps every important event visible across the app.
+Sprint 5 turns Hub4Learners into a place where learners and professors actually interact. Two communication channels ship in parallel: lesson-level discussion threads with votes and reports, and real-time friend messaging with text and media. A unified notification system keeps every important event visible across the app, and university admins can broadcast announcements to their entire institution.
 
 ## Sprint Goal
 
-> Enable real-time communication across the platform through discussions, friend messaging, professor chat requests, and live notifications.
+> Enable real-time communication across the platform through discussions, friend messaging, live notifications, and university announcements.
 
 ---
 
@@ -33,22 +33,13 @@ Sprint 5 turns Hub4Learners into a place where learners and professors actually 
 | US-5.8 | Medium | As a user, I can send images or files as attachments | T-5.8.1: Media upload · T-5.8.2: Inline preview |
 | US-5.9 | Medium | As a user, I can view my full message history with a friend | T-5.9.1: History endpoint |
 
-### Professor Chat Requests
-
-| ID | Priority | Story | Subtasks |
-|---|---|---|---|
-| US-5.10 | High | As a student, I can send a chat request to a professor | T-5.10.1: Request endpoint |
-| US-5.11 | High | As a professor, I can accept or refuse chat requests | T-5.11.1: Review endpoint |
-| US-5.12 | Medium | As a professor, I can toggle auto-refuse to decline new requests automatically | T-5.12.1: Auto-refuse setting |
-| US-5.13 | High | As both sides, once accepted I can exchange messages in real time | T-5.13.1: Chat room WebSocket · T-5.13.2: Message persistence |
-
 ### Notifications & Announcements
 
 | ID | Priority | Story | Subtasks |
 |---|---|---|---|
-| US-5.14 | High | As a user, I receive live notifications for relevant events (messages, requests, enrollments, role changes) | T-5.14.1: Notification push · T-5.14.2: Bell + unread badge |
-| US-5.15 | Medium | As a user, I can mark notifications as read or clear them all | T-5.15.1: Read / clear endpoints |
-| US-5.16 | Medium | As a university admin, I can post an announcement that fans out to my university | T-5.16.1: Announcement endpoint · T-5.16.2: Recipient fan-out |
+| US-5.10 | High | As a user, I receive live notifications for relevant events (friend requests, messages, enrollments, role changes) | T-5.10.1: Notification push · T-5.10.2: Bell + unread badge |
+| US-5.11 | Medium | As a user, I can mark notifications as read or clear them all | T-5.11.1: Read / clear endpoints |
+| US-5.12 | Medium | As a university admin, I can post an announcement that fans out to my university | T-5.12.1: Announcement endpoint · T-5.12.2: Recipient fan-out |
 
 ---
 
@@ -56,18 +47,18 @@ Sprint 5 turns Hub4Learners into a place where learners and professors actually 
 
 ### C4 Component View — Communication Domain
 
-This diagram shows the four parallel communication subsystems — discussions, chat & friend messages, notifications, and announcements — all served by the same FastAPI backend and reusing a single WebSocket manager for real-time delivery across three room types.
+This diagram shows the three parallel communication subsystems — discussions, friend messages, and notifications/announcements — all served by the same FastAPI backend and reusing a single WebSocket manager for real-time delivery across two room types.
 
 ```mermaid
 graph TD
     A["React Frontend<br/>(Discussions · Messages · Notifications)"] -->|REST| B["discussion_routes.py"]
-    A -->|REST| C["chat_routes.py + friend_routes.py"]
+    A -->|REST| C["friend_routes.py"]
     A -->|REST| D["notification_routes.py + announcement_routes.py"]
-    A -. WS .-> E["ws_routes.py<br/>/ws/notifications · /ws/chat · /ws/friends"]
+    A -. WS .-> E["ws_routes.py<br/>/ws/notifications · /ws/friends"]
     B --> F["discussion_controller<br/>posts · votes · reports · summary"]
-    C --> G["chat_controller + friend_controller"]
+    C --> G["friend_controller"]
     D --> H["notification_controller + announcements"]
-    E --> I["websocket_manager<br/>(user · chat · friend rooms)"]
+    E --> I["websocket_manager<br/>(user · friend rooms)"]
     F --> J["SQLAlchemy ORM"]
     G --> J
     H --> J
@@ -76,7 +67,7 @@ graph TD
 
 ### Class Diagram — Communication Entities
 
-The class diagram covers all eight new entities of this sprint: discussion posts with their associated votes, reports and summary, direct messages on both the friend and chat-request channels, and the unified Notification and Announcement records.
+The class diagram covers the entities introduced by this sprint: discussion posts with their associated votes, reports and summary, friend messages, and the unified Notification and Announcement records.
 
 ```mermaid
 classDiagram
@@ -110,20 +101,6 @@ classDiagram
         string media_type
     }
 
-    class ChatRequest {
-        UUID id
-        UUID student_id
-        UUID professor_id
-        string status
-    }
-
-    class Message {
-        UUID id
-        UUID chat_request_id
-        UUID sender_id
-        string content
-    }
-
     class Notification {
         UUID id
         UUID user_id
@@ -143,13 +120,12 @@ classDiagram
     DiscussionPost "0..*" --> "0..1" DiscussionPost
     DiscussionVote "*" --> "1" DiscussionPost
     DiscussionReport "*" --> "1" DiscussionPost
-    Message "*" --> "1" ChatRequest
     FriendMessage "*" --> "1" Friendship
 ```
 
 ### Use Case Diagram — Communication & Community
 
-The use case diagram lays out who can do what across the three communication channels — discussions, friend messages, and chat requests — and adds the announcement-posting capability reserved for university admins.
+The use case diagram lays out who can do what across the two communication channels — discussions and friend messages — and adds the announcement-posting capability reserved for university admins.
 
 ```mermaid
 graph LR
@@ -164,11 +140,8 @@ graph LR
     UC5([Summarize Thread])
     UC6([Send Friend Message])
     UC7([Send Media Attachment])
-    UC8([Send Chat Request])
-    UC9([Accept / Refuse Request])
-    UC10([Toggle Auto-Refuse])
-    UC11([Receive Notifications])
-    UC12([Post Announcement])
+    UC8([Receive Notifications])
+    UC9([Post Announcement])
 
     S --> UC1
     S --> UC2
@@ -178,15 +151,12 @@ graph LR
     S --> UC6
     S --> UC7
     S --> UC8
-    S --> UC11
     P --> UC1
     P --> UC2
     P --> UC6
-    P --> UC9
-    P --> UC10
-    P --> UC11
-    UA --> UC12
-    UA --> UC11
+    P --> UC8
+    UA --> UC9
+    UA --> UC8
 ```
 
 ### Sequence Diagram — Real-Time Friend Messaging
@@ -295,8 +265,8 @@ sequenceDiagram
 
 | Topic | Outcome |
 |---|---|
-| Review | Demonstrated the three communication channels — per-lesson discussions, friend chat with media, and student/professor chat requests — plus the unified notification system and university-scoped announcements. All user stories met their Definition of Done. |
-| Went well | Reusing a single WebSocket manager across three room types (notifications, chat requests, friendships) kept the real-time layer simple, and the JWT-on-query-string authentication on every socket made connection handling consistent. |
+| Review | Demonstrated the two communication channels — per-lesson discussions and friend chat with media — plus the unified notification system and university-scoped announcements. All user stories met their Definition of Done. |
+| Went well | Reusing a single WebSocket manager across two room types (notifications and friendships) kept the real-time layer simple, and the JWT-on-query-string authentication on every socket made connection handling consistent. |
 | To improve | When a recipient is offline, WebSocket broadcasts are silently dropped — only the database notification persists. A proper offline-delivery story (push or polling fallback on reconnect) should be planned next. |
 
 ---

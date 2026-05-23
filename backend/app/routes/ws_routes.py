@@ -32,27 +32,6 @@ async def ws_notifications(
         manager.disconnect_user(user_id, websocket)
 
 
-@router.websocket("/ws/chat/{request_id}")
-async def ws_chat(
-    websocket: WebSocket,
-    request_id: str,
-    token: str = Query(...),
-):
-    await websocket.accept()
-    try:
-        jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    except JWTError:
-        await websocket.close(code=1008)
-        return
-
-    manager.chat_rooms[request_id].append(websocket)
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        manager.disconnect_chat(request_id, websocket)
-
-
 @router.websocket("/ws/friends/{friendship_id}")
 async def ws_friend(
     websocket: WebSocket,

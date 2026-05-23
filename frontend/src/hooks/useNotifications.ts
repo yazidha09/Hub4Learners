@@ -12,8 +12,6 @@ export type NotificationType =
   | 'friend_request'
   | 'friend_request_reviewed'
   | 'friend_message'
-  | 'chat_request'
-  | 'chat_request_reviewed'
   | 'enrollment'
   | 'role_changed'
 

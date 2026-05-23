@@ -23,8 +23,6 @@ from app.models.courses import Course           # noqa: F401
 from app.models.course_section import CourseSection  # noqa: F401
 from app.models.course_material import CourseMaterial  # noqa: F401
 from app.models.enrollment import Enrollment    # noqa: F401
-from app.models.chat_request import ChatRequest  # noqa: F401
-from app.models.message import Message          # noqa: F401
 from app.models.university_join_request import UniversityJoinRequest  # noqa: F401
 from app.models.friendship import Friendship          # noqa: F401
 from app.models.friend_message import FriendMessage   # noqa: F401
@@ -48,7 +46,6 @@ from app.routes.auth_routes import router as auth_router
 from app.routes.course_routes import router as course_router
 from app.routes.category_routes import router as category_router
 from app.routes.admin_routes import router as admin_router
-from app.routes.chat_routes import router as chat_router
 from app.routes.org_routes import router as org_router
 from app.routes.ai_routes import router as ai_router
 from app.routes.friend_routes import router as friend_router
@@ -130,7 +127,6 @@ def on_startup():
             "ALTER TABLE courses ADD COLUMN IF NOT EXISTS is_subscription BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE courses ADD COLUMN IF NOT EXISTS ai_summary TEXT",
             "ALTER TABLE courses ADD COLUMN IF NOT EXISTS ai_summary_generated_at TIMESTAMP",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS auto_refuse_chat BOOLEAN NOT NULL DEFAULT FALSE",
             # ── If the role column is a PG enum, convert it to plain VARCHAR
             # so new role strings are accepted without altering the enum type.
             """
@@ -487,7 +483,6 @@ app.include_router(auth_router,     prefix="/api")
 app.include_router(course_router,   prefix="/api")
 app.include_router(category_router, prefix="/api")
 app.include_router(admin_router,    prefix="/api")
-app.include_router(chat_router,     prefix="/api")
 app.include_router(org_router,               prefix="/api")
 app.include_router(ai_router,                prefix="/api")
 app.include_router(friend_router,            prefix="/api")

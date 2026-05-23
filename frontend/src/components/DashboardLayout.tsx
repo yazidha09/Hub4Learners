@@ -33,16 +33,6 @@ const NOTIF_ICONS: Record<NotificationType | string, React.ReactNode> = {
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   ),
-  chat_request: (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  ),
-  chat_request_reviewed: (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  ),
   enrollment: (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" />
@@ -65,8 +55,6 @@ const NOTIF_COLORS: Record<NotificationType | string, string> = {
   friend_request:          'bg-blue-100 text-blue-600',
   friend_request_reviewed: 'bg-emerald-100 text-emerald-600',
   friend_message:          'bg-violet-100 text-violet-600',
-  chat_request:            'bg-amber-100 text-amber-600',
-  chat_request_reviewed:   'bg-sky-100 text-sky-600',
   enrollment:              'bg-teal-100 text-teal-600',
   role_changed:            'bg-purple-100 text-purple-600',
   announcement:            'bg-orange-100 text-orange-500',
