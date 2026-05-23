@@ -126,16 +126,33 @@ sequenceDiagram
     actor Student
     participant Frontend
     participant API as FastAPI
+    participant Sec as utils/security
+    participant RAG as utils/rag
     participant Pinecone
     participant Gemini
+    participant DB as Neon PostgreSQL
 
-    Student->>Frontend: Ask a question
-    Frontend->>API: POST /ai/chat
-    API->>Pinecone: Query top relevant chunks
-    Pinecone-->>API: Course content snippets
-    API->>Gemini: Prompt with chunks + question
-    Gemini-->>API: Grounded answer
-    API-->>Frontend: Reply text
+    Student->>Frontend: Type question in tutor panel
+    Frontend->>+API: POST /ai/chat (Bearer token)
+    API->>+Sec: get_current_user(token)
+    Sec-->>-API: payload
+    API->>+DB: SELECT course by id
+    DB-->>-API: course row
+    alt Course not found
+        API-->>Frontend: 404 Not found
+    else Course exists
+        API->>+RAG: search_course(course_id, message)
+        RAG->>RAG: Self: embed query (768-dim via Gemini)
+        RAG->>+Pinecone: Query top-K vectors (score ≥ 0.40)
+        Pinecone-->>-RAG: matched chunks
+        RAG-->>-API: context chunks
+        opt No chunks AND DB has text content
+            API->>RAG: kick off background re-index (self-heal)
+        end
+        API->>+Gemini: chat_with_context(course, chunks, history, q)
+        Gemini-->>-API: grounded answer
+        API-->>-Frontend: { reply }
+    end
 ```
 
 ### Sequence Diagram — PDF → Course Generation
@@ -145,22 +162,52 @@ sequenceDiagram
     actor Professor
     participant Frontend
     participant API as FastAPI
+    participant Sec as utils/security
+    participant CGen as course_generation_controller
+    participant PDF as utils/pdf_parser
     participant Gemini
     participant DB as Neon PostgreSQL
 
-    Professor->>Frontend: Upload PDF
-    Frontend->>API: POST /course-gen/upload
-    API->>DB: Insert job (status=processing)
-    API-->>Frontend: job_id
+    Professor->>Frontend: Upload PDF + difficulty
+    Frontend->>+API: POST /course-gen/upload
+    API->>+Sec: require_role("professor")
+    Sec-->>-API: ok
+    alt File not PDF OR > 20 MB
+        API-->>Frontend: 400 / 413 error
+    else Valid
+        API->>+DB: INSERT GeneratedCourse(status='processing')
+        DB-->>-API: job row
+        API-->>-Frontend: 202 { job_id }
+        Note over API,Gemini: BackgroundTasks — async pipeline
+        API->>+CGen: run_pipeline(job_id, pdf_bytes)
+        CGen->>+PDF: parse_pdf(bytes)
+        PDF-->>-CGen: chunks with line metadata
+        CGen->>+Gemini: outline prompt (assign chunks to sections)
+        Gemini-->>-CGen: JSON outline
+        CGen->>CGen: Self: render verbatim HTML per subsection
+        CGen->>+DB: UPDATE job(status='completed', result=JSON)
+        DB-->>-CGen: ok
+        deactivate CGen
+    end
 
-    Note over API,Gemini: Background task
-    API->>Gemini: Generate course outline
-    Gemini-->>API: Sections + subsections JSON
-    API->>DB: Update job (status=completed)
+    Note over Frontend,API: Polling for completion
 
-    Professor->>Frontend: Review + Import
-    Frontend->>API: POST /course-gen/{job_id}/import
-    API->>DB: Create real Course + Sections + Blocks
+    loop Every few seconds
+        Frontend->>+API: GET /course-gen/{job_id}
+        API->>+DB: SELECT job
+        DB-->>-API: job row
+        API-->>-Frontend: status
+        alt status == "completed"
+            Note right of Frontend: Stop polling
+        end
+    end
+
+    Professor->>Frontend: Review + click Import
+    Frontend->>+API: POST /course-gen/{job_id}/import/{course_id}
+    API->>+DB: INSERT Course + Sections + Subsections + Blocks
+    DB-->>-API: rows
+    API->>API: Self: synchronous RAG re-index
+    API-->>-Frontend: { sections_created, lessons_created }
 ```
 
 ---

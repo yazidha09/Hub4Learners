@@ -190,40 +190,112 @@ graph LR
 sequenceDiagram
     actor UserA
     actor UserB
+    participant FA as Frontend A
+    participant FB as Frontend B
     participant API as FastAPI
+    participant Sec as utils/security
     participant WS as WebSocket Manager
+    participant Notif as notification_controller
     participant DB as Neon PostgreSQL
 
-    UserA->>API: WS /ws/friends/{id} (token)
-    UserB->>API: WS /ws/friends/{id} (token)
-    API->>WS: Register both sockets
+    Note over FA,API: Establish WS connections (auth via query token)
 
-    UserA->>API: POST /friends/{id}/messages
-    API->>DB: Insert FriendMessage
-    API->>WS: Broadcast payload
-    WS-->>UserA: message frame
-    WS-->>UserB: message frame
-    API-->>UserB: Notification
+    UserA->>+FA: Open chat
+    FA->>+API: WS /ws/friends/{id}?token=JWT
+    API->>+Sec: jwt.decode(token)
+    alt Invalid token
+        Sec-->>API: JWTError
+        API-->>FA: close(1008)
+    else Valid
+        Sec-->>-API: payload
+        API->>WS: register socket in friend_rooms[id]
+        API-->>-FA: accepted
+    end
+    deactivate FA
+
+    UserB->>FB: Open chat
+    FB->>API: WS /ws/friends/{id}?token=JWT
+    API->>WS: register socket in friend_rooms[id]
+
+    Note over FA,WS: Real-time message exchange
+
+    UserA->>FA: Type message + send
+    FA->>+API: POST /friends/{id}/messages (Bearer token)
+    API->>+Sec: get_current_user(token)
+    Sec-->>-API: payload
+    API->>+DB: INSERT FriendMessage
+    DB-->>-API: row
+    API->>+WS: broadcast_friend(id, payload)
+    par Broadcast to all connected sockets
+        WS-->>FA: message frame
+    and
+        WS-->>FB: message frame
+    end
+    WS-->>-API: done
+    API->>+Notif: push("New Message", to=B)
+    Notif-->>-API: ok
+    API-->>-FA: FriendMessageOut
 ```
 
-### Sequence Diagram — Discussion Post & AI Summary
+### Sequence Diagram — Discussion Post, Vote & AI Summary
 
 ```mermaid
 sequenceDiagram
     actor Student
+    participant Frontend
     participant API as FastAPI
+    participant Sec as utils/security
+    participant Disc as discussion_controller
     participant Gemini
     participant DB as Neon PostgreSQL
 
-    Student->>API: POST /discussions/subsections/{id}
-    API->>DB: Insert DiscussionPost
+    Student->>Frontend: Submit comment
+    Frontend->>+API: POST /discussions/subsections/{id}
+    API->>+Sec: get_current_user(token)
+    Sec-->>-API: payload
+    API->>+Disc: create_post(content)
+    Disc->>+DB: INSERT DiscussionPost
+    DB-->>-Disc: row
+    Disc-->>-API: DiscussionPostOut
+    API-->>-Frontend: 201 post
 
-    Student->>API: POST .../summary/regenerate
-    API->>DB: Load posts
-    API->>Gemini: Prompt for summary
-    Gemini-->>API: Markdown summary
-    API->>DB: Save DiscussionSummary
-    API-->>Student: Summary payload
+    Note over Student,API: Upvote toggle (idempotent)
+
+    Student->>Frontend: Click upvote
+    Frontend->>+API: POST /discussions/{post_id}/vote
+    API->>+Disc: toggle_vote(post_id, user_id)
+    Disc->>+DB: SELECT existing DiscussionVote
+    DB-->>-Disc: result
+    alt Already voted
+        Disc->>+DB: DELETE vote
+        DB-->>-Disc: ok
+        Disc->>Disc: Self: decrement upvote_count
+    else Not voted yet
+        Disc->>+DB: INSERT vote (UNIQUE post_id, user_id)
+        DB-->>-Disc: ok
+        Disc->>Disc: Self: increment upvote_count
+    end
+    Disc-->>-API: DiscussionVoteOut
+    API-->>-Frontend: result
+
+    Note over Student,API: Generate AI summary of the thread
+
+    Student->>Frontend: Click "Summarize"
+    Frontend->>+API: POST /discussions/subsections/{id}/summary/regenerate
+    API->>+Disc: regenerate_summary(subsection_id)
+    Disc->>+DB: SELECT all posts in thread
+    DB-->>-Disc: posts
+    alt Not enough posts
+        Disc-->>API: 400 Need more posts
+        API-->>Frontend: 400 error
+    else Enough posts
+        Disc->>+Gemini: prompt(thread → markdown)
+        Gemini-->>-Disc: summary_md
+        Disc->>+DB: UPSERT DiscussionSummary
+        DB-->>-Disc: ok
+        Disc-->>-API: DiscussionSummaryOut
+        API-->>-Frontend: summary
+    end
 ```
 
 ---

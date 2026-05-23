@@ -159,38 +159,89 @@ graph LR
 
 ```mermaid
 sequenceDiagram
-    participant Source as Course / Quiz endpoint
+    participant Source as Course / Quiz route
     participant XP as xp_service
+    participant Lvl as utils/leveling
+    participant Ach as achievements_service
     participant DB as Neon PostgreSQL
 
-    Source->>XP: award_xp(user, source_type, source_id)
-    XP->>DB: Check one-shot / cooldown / daily cap
-    alt Allowed
-        XP->>DB: Insert XPLog + update total_xp
-        XP->>XP: Recompute level + streak
-        XP->>XP: Check achievement & badge triggers
-        XP-->>Source: { amount, level_up?, new unlocks }
-    else Skip
-        XP-->>Source: 0 (already awarded / capped)
+    Source->>+XP: award_xp(user, source_type, source_id, amount?)
+    XP->>+DB: SELECT or INSERT UserGamification
+    DB-->>-XP: state
+    XP->>+DB: SUM XP gained today
+    DB-->>-XP: today_total
+    alt today_total + amount > DAILY_XP_CAP
+        XP-->>Source: 0 (daily cap reached)
+    else source ∈ ONE_SHOT_SOURCES AND already awarded
+        XP-->>Source: 0 (duplicate artifact)
+    else source ∈ COOLDOWN_SECONDS AND within window
+        XP-->>Source: 0 (cooling down)
+    else Award allowed
+        XP->>+DB: INSERT XPLog
+        DB-->>-XP: log row
+        XP->>+DB: UPDATE total_xp
+        DB-->>-XP: ok
+        XP->>+Lvl: calculate_level_from_xp(total)
+        Lvl-->>-XP: new_level
+        opt new_level > previous_level
+            XP->>+DB: UPDATE level
+            DB-->>-XP: ok
+        end
+        XP->>XP: Self: update streak (if applicable)
+        XP->>+Ach: check achievement & badge triggers
+        Ach-->>-XP: newly unlocked
+        XP-->>-Source: XPGainOut { amount, level_up, new_unlocks }
     end
 ```
 
-### Sequence Diagram — Friend Request
+### Sequence Diagram — Friend Request Lifecycle
 
 ```mermaid
 sequenceDiagram
     actor UserA
     actor UserB
     participant API as FastAPI
+    participant Sec as utils/security
+    participant Notif as notification_controller
+    participant WS as WebSocket Manager
     participant DB as Neon PostgreSQL
 
-    UserA->>API: POST /friends/request (B)
-    API->>DB: Insert Friendship (pending)
-    API-->>UserB: Notification
+    UserA->>+API: POST /friends/request (Bearer token)
+    API->>+Sec: get_current_user(token)
+    Sec-->>-API: payload
+    API->>+DB: SELECT existing Friendship(A, B)
+    DB-->>-API: result
+    alt Already friends or pending
+        API-->>Frontend: 409 Conflict
+    else New request
+        API->>+DB: INSERT Friendship(status='pending')
+        DB-->>-API: row
+        API->>+Notif: push("Friend Request", to=B)
+        Notif->>+DB: INSERT Notification
+        DB-->>-Notif: ok
+        Notif->>+WS: broadcast to user_rooms[B]
+        WS-->>-Notif: delivered
+        Notif-->>-API: ok
+        API-->>-UserA: FriendRequestOut
+    end
 
-    UserB->>API: PUT /friends/requests/{id}/review (accept)
-    API->>DB: Update Friendship (accepted)
-    API-->>UserA: Notification
+    Note over UserB,API: B reviews the request
+
+    UserB->>+API: PUT /friends/requests/{id}/review {action}
+    API->>+Sec: get_current_user(token)
+    Sec-->>-API: payload
+    alt action == "accept"
+        API->>+DB: UPDATE Friendship status='accepted', reviewed_at=now
+        DB-->>-API: row
+        API->>+Notif: push("Request Accepted", to=A)
+        Notif-->>-API: ok
+    else action == "decline"
+        API->>+DB: UPDATE Friendship status='declined'
+        DB-->>-API: row
+        API->>+Notif: push("Request Declined", to=A)
+        Notif-->>-API: ok
+    end
+    API-->>-UserB: FriendRequestOut
 ```
 
 ---
