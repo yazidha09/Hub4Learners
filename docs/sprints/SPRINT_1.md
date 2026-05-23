@@ -96,6 +96,39 @@ classDiagram
     UniversityJoinRequest "*" --> "1" University
 ```
 
+### Use Case Diagram — Authentication & Organisation
+
+```mermaid
+graph LR
+    V((Visitor))
+    U((User))
+    P((Professor))
+    UA((University Admin))
+    SA((Super Admin))
+
+    UC1([Register])
+    UC2([Login])
+    UC3([View Profile])
+    UC4([Update Profile])
+    UC5([Configure Settings])
+    UC6([Logout])
+    UC7([Submit Join Request])
+    UC8([Review Join Requests])
+    UC9([Manage Regions & Universities])
+    UC10([Change User Role])
+
+    V --> UC1
+    V --> UC2
+    U --> UC3
+    U --> UC4
+    U --> UC5
+    U --> UC6
+    P --> UC7
+    UA --> UC8
+    SA --> UC9
+    SA --> UC10
+```
+
 ### Sequence Diagram — Registration & Login
 
 ```mermaid
@@ -116,6 +149,26 @@ sequenceDiagram
     Frontend->>API: POST /auth/login
     API->>DB: Verify credentials
     API-->>Frontend: JWT token + user payload
+```
+
+### Sequence Diagram — Professor Join Request Flow
+
+```mermaid
+sequenceDiagram
+    actor Professor
+    actor UniAdmin as University Admin
+    participant API as FastAPI
+    participant DB as Neon PostgreSQL
+
+    Professor->>API: POST /org/join-requests
+    API->>DB: Insert request (status=pending)
+    API-->>Professor: Request submitted
+
+    UniAdmin->>API: GET /org/join-requests
+    API-->>UniAdmin: Pending requests
+    UniAdmin->>API: PUT /org/join-requests/{id}/review (approve)
+    API->>DB: Update request + set user.university_id
+    API-->>UniAdmin: Approved
 ```
 
 ---

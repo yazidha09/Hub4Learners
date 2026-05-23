@@ -104,6 +104,43 @@ classDiagram
     Announcement "*" --> "1" University
 ```
 
+### Use Case Diagram — Payments, Analytics & Admin
+
+```mermaid
+graph LR
+    S((Student))
+    P((Professor))
+    UA((University Admin))
+    SA((Super Admin))
+
+    UC1([Buy Paid Course])
+    UC2([Confirm Payment])
+    UC3([View My Learning Analytics])
+    UC4([View Course Analytics])
+    UC5([View Learner Analytics])
+    UC6([View Platform Stats])
+    UC7([Manage Users])
+    UC8([Change User Role])
+    UC9([Manage Courses])
+    UC10([Delete Course])
+    UC11([Post Announcement])
+
+    S --> UC1
+    S --> UC2
+    S --> UC3
+    P --> UC4
+    P --> UC5
+    SA --> UC6
+    UA --> UC7
+    SA --> UC7
+    UA --> UC8
+    SA --> UC8
+    UA --> UC9
+    SA --> UC9
+    SA --> UC10
+    UA --> UC11
+```
+
 ### Sequence Diagram — Stripe Checkout & Enrollment
 
 ```mermaid

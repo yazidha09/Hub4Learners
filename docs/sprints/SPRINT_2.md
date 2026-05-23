@@ -121,6 +121,38 @@ classDiagram
     Course "1" --> "*" CourseFeedback
 ```
 
+### Use Case Diagram — Course Management
+
+```mermaid
+graph LR
+    P((Professor))
+    S((Student))
+
+    UC1([Create Course])
+    UC2([Add Sections & Subsections])
+    UC3([Add Lesson Blocks])
+    UC4([Upload Materials])
+    UC5([Publish / Unpublish])
+    UC6([Delete Course])
+    UC7([Browse Catalog])
+    UC8([Enroll in Course])
+    UC9([Mark Subsection Done])
+    UC10([View My Learning])
+    UC11([Rate & Review Course])
+
+    P --> UC1
+    P --> UC2
+    P --> UC3
+    P --> UC4
+    P --> UC5
+    P --> UC6
+    S --> UC7
+    S --> UC8
+    S --> UC9
+    S --> UC10
+    S --> UC11
+```
+
 ### Sequence Diagram — Course Creation & Publishing
 
 ```mermaid

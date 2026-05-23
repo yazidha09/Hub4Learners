@@ -89,6 +89,36 @@ classDiagram
     QCMAttempt "*" --> "1" Course
 ```
 
+### Use Case Diagram — AI Features
+
+```mermaid
+graph LR
+    S((Student))
+    P((Professor))
+
+    UC1([Ask AI Tutor])
+    UC2([Use Suggested Prompts])
+    UC3([Generate Quiz])
+    UC4([Submit Quiz])
+    UC5([View Quiz History])
+    UC6([Request Course Summary])
+    UC7([Upload PDF for Generation])
+    UC8([Review Generated Draft])
+    UC9([Regenerate Subsection])
+    UC10([Import Generated Course])
+
+    S --> UC1
+    S --> UC2
+    S --> UC3
+    S --> UC4
+    S --> UC5
+    S --> UC6
+    P --> UC7
+    P --> UC8
+    P --> UC9
+    P --> UC10
+```
+
 ### Sequence Diagram — AI Tutor (RAG Chat)
 
 ```mermaid

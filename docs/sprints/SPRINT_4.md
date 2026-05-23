@@ -120,6 +120,41 @@ classDiagram
     Friendship "*" --> "1" User
 ```
 
+### Use Case Diagram — Gamification & Social
+
+```mermaid
+graph LR
+    L((Learner))
+    P((Professor))
+
+    UC1([Earn XP from Activity])
+    UC2([Claim Daily Login Bonus])
+    UC3([View Level & Streak])
+    UC4([Browse Achievements])
+    UC5([Equip a Badge])
+    UC6([View Leaderboard])
+    UC7([View XP History])
+    UC8([Search Users])
+    UC9([Send Friend Request])
+    UC10([Accept / Decline Request])
+    UC11([Unfriend])
+
+    L --> UC1
+    L --> UC2
+    L --> UC3
+    L --> UC4
+    L --> UC5
+    L --> UC6
+    L --> UC7
+    L --> UC8
+    L --> UC9
+    L --> UC10
+    L --> UC11
+    P --> UC1
+    P --> UC3
+    P --> UC6
+```
+
 ### Sequence Diagram — Earning XP
 
 ```mermaid

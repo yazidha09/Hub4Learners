@@ -144,6 +144,46 @@ classDiagram
     Notification "*" --> "1" User
 ```
 
+### Use Case Diagram — Communication & Community
+
+```mermaid
+graph LR
+    S((Student))
+    P((Professor))
+    UA((University Admin))
+
+    UC1([Post in Discussion])
+    UC2([Reply to Post])
+    UC3([Upvote Post])
+    UC4([Report Post])
+    UC5([Summarize Thread])
+    UC6([Send Friend Message])
+    UC7([Send Media Attachment])
+    UC8([Send Chat Request])
+    UC9([Accept / Refuse Request])
+    UC10([Toggle Auto-Refuse])
+    UC11([Receive Notifications])
+    UC12([Post Announcement])
+
+    S --> UC1
+    S --> UC2
+    S --> UC3
+    S --> UC4
+    S --> UC5
+    S --> UC6
+    S --> UC7
+    S --> UC8
+    S --> UC11
+    P --> UC1
+    P --> UC2
+    P --> UC6
+    P --> UC9
+    P --> UC10
+    P --> UC11
+    UA --> UC12
+    UA --> UC11
+```
+
 ### Sequence Diagram — Real-Time Friend Messaging
 
 ```mermaid
