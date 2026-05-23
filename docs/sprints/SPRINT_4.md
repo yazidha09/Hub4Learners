@@ -44,6 +44,8 @@ Sprint 4 adds the engagement layer of the platform. Learners earn XP for meaning
 
 ### C4 Component View — Gamification & Social Domain
 
+This diagram shows two sibling subsystems sharing the same database: gamification (XP service + achievements/badges/leaderboard) on one side, and the social graph (search + friend requests) on the other.
+
 ```mermaid
 graph TD
     A["React Frontend<br/>(Hero Stats · Leaderboard · Friends)"] -->|REST| B["gamification_routes.py"]
@@ -58,6 +60,8 @@ graph TD
 ```
 
 ### Class Diagram — Gamification & Friendship
+
+The class diagram covers the seven entities introduced by this sprint: per-user gamification state, the XP audit log, the achievement and badge catalogs with their unlock join tables, and the friendship record that powers the social graph.
 
 ```mermaid
 classDiagram
@@ -122,6 +126,8 @@ classDiagram
 
 ### Use Case Diagram — Gamification & Social
 
+The use case diagram maps the gamification and social actions available to learners (XP, levels, streaks, achievements, badges, leaderboards, friend graph) and the subset that also applies to professors who participate in XP and leaderboards as content authors.
+
 ```mermaid
 graph LR
     L((Learner))
@@ -156,6 +162,8 @@ graph LR
 ```
 
 ### Sequence Diagram — Earning XP
+
+This sequence walks through the central `award_xp` choke point that every grant flows through, showing the three guardrails — daily cap, one-shot artifact check, source cooldown — and the cascade that happens on a successful award: level recompute, streak update, and achievement/badge unlock checks.
 
 ```mermaid
 sequenceDiagram
@@ -193,6 +201,8 @@ sequenceDiagram
 ```
 
 ### Sequence Diagram — Friend Request Lifecycle
+
+This diagram traces both sides of a friend request — sender and recipient — including the duplicate-request guard, the accept/decline branches, and the live WebSocket notifications that keep both users informed without polling.
 
 ```mermaid
 sequenceDiagram

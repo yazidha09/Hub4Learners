@@ -56,6 +56,8 @@ Sprint 5 turns Hub4Learners into a place where learners and professors actually 
 
 ### C4 Component View — Communication Domain
 
+This diagram shows the four parallel communication subsystems — discussions, chat & friend messages, notifications, and announcements — all served by the same FastAPI backend and reusing a single WebSocket manager for real-time delivery across three room types.
+
 ```mermaid
 graph TD
     A["React Frontend<br/>(Discussions · Messages · Notifications)"] -->|REST| B["discussion_routes.py"]
@@ -73,6 +75,8 @@ graph TD
 ```
 
 ### Class Diagram — Communication Entities
+
+The class diagram covers all eight new entities of this sprint: discussion posts with their associated votes, reports and summary, direct messages on both the friend and chat-request channels, and the unified Notification and Announcement records.
 
 ```mermaid
 classDiagram
@@ -146,6 +150,8 @@ classDiagram
 
 ### Use Case Diagram — Communication & Community
 
+The use case diagram lays out who can do what across the three communication channels — discussions, friend messages, and chat requests — and adds the announcement-posting capability reserved for university admins.
+
 ```mermaid
 graph LR
     S((Student))
@@ -185,6 +191,8 @@ graph LR
 ```
 
 ### Sequence Diagram — Real-Time Friend Messaging
+
+This sequence shows the two phases of a friend chat: each user opens an authenticated WebSocket connection, then a sent message is persisted and broadcast in parallel to every connected socket in the friendship room, with an offline notification triggered for the recipient as well.
 
 ```mermaid
 sequenceDiagram
@@ -230,6 +238,8 @@ sequenceDiagram
 ```
 
 ### Sequence Diagram — Discussion Post, Vote & AI Summary
+
+This diagram covers three discussion actions in one flow: posting a comment, toggling an upvote (with the database-level uniqueness guard), and regenerating the AI summary of an entire thread through a Gemini call cached for the subsection.
 
 ```mermaid
 sequenceDiagram

@@ -41,6 +41,8 @@ Sprint 2 introduces the content layer of Hub4Learners. Professors gain a full au
 
 ### C4 Component View — Course Management Domain
 
+This diagram shows the course management subsystem: the frontend talks to `course_routes`, which delegates to a single course controller responsible for authoring, enrollment, and progress, with thumbnails and lesson media saved to the local file storage.
+
 ```mermaid
 graph TD
     A["React Frontend<br/>(Professor + Student dashboards)"] -->|REST| B["course_routes.py<br/>Course · Section · Block · Enroll · Progress"]
@@ -51,6 +53,8 @@ graph TD
 ```
 
 ### Class Diagram — Course Hierarchy
+
+The class diagram models the four-level content hierarchy (Course → Section → Subsection → LessonBlock), the engagement side (Enrollment + CourseProgress), and the feedback entity that captures one rating per student per course.
 
 ```mermaid
 classDiagram
@@ -123,6 +127,8 @@ classDiagram
 
 ### Use Case Diagram — Course Management
 
+The use case diagram separates professor responsibilities (authoring and publishing) from student actions (discovering, enrolling, learning, and rating), showing the clear split in capabilities introduced by this sprint.
+
 ```mermaid
 graph LR
     P((Professor))
@@ -154,6 +160,8 @@ graph LR
 ```
 
 ### Sequence Diagram — Course Creation & Publishing
+
+This sequence follows a professor from the initial course creation, through iteratively adding sections, subsections and blocks, to the final publish action that flips the visibility flag and triggers a background re-index for the AI tutor.
 
 ```mermaid
 sequenceDiagram
@@ -194,6 +202,8 @@ sequenceDiagram
 ```
 
 ### Sequence Diagram — Enrollment & Progress Tracking
+
+This diagram traces a student from enrolling in a course to marking individual subsections complete, with explicit handling of duplicate enrollments, idempotent progress updates, and the 100% completion event that closes the learning loop.
 
 ```mermaid
 sequenceDiagram

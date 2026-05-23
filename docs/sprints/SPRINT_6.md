@@ -51,6 +51,8 @@ The final sprint completes Hub4Learners with monetisation, insight, and governan
 
 ### C4 Component View — Payments, Analytics & Admin
 
+This diagram brings together the three closing subsystems of the project: Stripe-backed payments, the three analytics surfaces (course, learner, student), and the administration controllers used by university and super admins to govern the platform.
+
 ```mermaid
 graph TD
     A["React Frontend<br/>(Checkout · Analytics · Admin Panel)"] -->|REST| B["payment_routes.py"]
@@ -71,6 +73,8 @@ graph TD
 ```
 
 ### Class Diagram — Payments, Analytics & Admin
+
+The class diagram revisits the entities touched by this sprint — Course and Enrollment on the payments side, User and Announcement on the admin side — plus the three organisation-scoped models (Region, University, UniversityJoinRequest) carried into this sprint from earlier scope discussions.
 
 ```mermaid
 classDiagram
@@ -132,6 +136,8 @@ classDiagram
 
 ### Use Case Diagram — Payments, Analytics & Admin
 
+The use case diagram spans the four roles of the platform: students buy and confirm payment, professors and learners read their analytics, and the two admin tiers manage users, courses, regions, universities, announcements, and join requests at the appropriate scope.
+
 ```mermaid
 graph LR
     S((Student))
@@ -174,6 +180,8 @@ graph LR
 ```
 
 ### Sequence Diagram — Stripe Checkout & Enrollment
+
+This sequence traces the full purchase flow: validation guards before opening a Stripe Checkout session, the redirect-and-pay step on Stripe's hosted page, and the frontend-driven confirmation call that retrieves the session, verifies it was paid, and creates the enrollment.
 
 ```mermaid
 sequenceDiagram
@@ -222,6 +230,8 @@ sequenceDiagram
 
 ### Sequence Diagram — Professor Join Request Flow
 
+This diagram models both sides of the institutional attachment workflow: a professor submits a request guarded against duplicates, then a university admin reviews it — approving updates the user's `university_id` directly, while rejecting just closes the request, with a notification sent either way.
+
 ```mermaid
 sequenceDiagram
     actor Professor
@@ -265,6 +275,8 @@ sequenceDiagram
 ```
 
 ### Sequence Diagram — University Announcement Broadcast
+
+This sequence shows the fan-out pattern used by university announcements: one POST creates a single `Announcement` row but loops over every user in the university to insert per-user `Notification` rows and push them live through the WebSocket manager.
 
 ```mermaid
 sequenceDiagram

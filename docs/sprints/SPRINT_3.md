@@ -40,6 +40,8 @@ Sprint 3 brings AI capabilities into the platform. Students gain a course-scoped
 
 ### C4 Component View — AI Domain
 
+This diagram exposes the AI subsystem in full: `ai_routes` and `course_generation_routes` are the two entry points, the utility modules (`rag`, `gemini`, `pdf_parser`, `course_generator`) handle the heavy lifting, and the system relies on two external services — Pinecone for vector search and Google Gemini for both embeddings and LLM completions.
+
 ```mermaid
 graph TD
     A["React Frontend<br/>(AI Tutor · QCM · PDF Wizard)"] -->|REST| B["ai_routes.py<br/>chat · qcm · summary"]
@@ -56,6 +58,8 @@ graph TD
 ```
 
 ### Class Diagram — AI-Related Entities
+
+The class diagram covers the three persistence concerns introduced by AI features: the `GeneratedCourse` job rows for PDF-driven authoring, the `QCMAttempt` records of every quiz a student takes, and the two new fields on `Course` that cache the AI-generated markdown summary.
 
 ```mermaid
 classDiagram
@@ -91,6 +95,8 @@ classDiagram
 
 ### Use Case Diagram — AI Features
 
+The use case diagram groups the AI capabilities by actor: students use the tutor, suggested prompts, quizzes, and course summaries, while professors use the PDF-to-course pipeline and can regenerate or import individual sections.
+
 ```mermaid
 graph LR
     S((Student))
@@ -120,6 +126,8 @@ graph LR
 ```
 
 ### Sequence Diagram — AI Tutor (RAG Chat)
+
+This sequence shows the full Retrieval-Augmented Generation flow: the user question is embedded, top chunks above a similarity threshold are pulled from Pinecone, and Gemini is asked to answer using only that retrieved context — with a self-heal branch that triggers a background re-index when the course has text content but no vectors yet.
 
 ```mermaid
 sequenceDiagram
@@ -151,6 +159,8 @@ sequenceDiagram
 ```
 
 ### Sequence Diagram — PDF → Course Generation
+
+This diagram captures the three phases of PDF-driven authoring: synchronous upload validation, an async background pipeline that calls Gemini to organise content while preserving the original wording, and a polling loop the frontend uses to surface job status until the professor can review and import the draft.
 
 ```mermaid
 sequenceDiagram

@@ -31,6 +31,8 @@ The first sprint focuses on the foundation of Hub4Learners: a secure way for use
 
 ### C4 Component View — Authentication Domain
 
+This diagram shows the internal structure of the authentication module: the React frontend talks to a single `auth_routes` entry point, which delegates to the controller, the security utilities (JWT + bcrypt), and finally the database. It is the only sprint with no external third-party service.
+
 ```mermaid
 graph TD
     A["React Frontend<br/>(Login & Register pages)"] -->|REST| B["auth_routes.py<br/>Register · Login · Me"]
@@ -42,6 +44,8 @@ graph TD
 ```
 
 ### Class Diagram — User Identity
+
+The class diagram captures the two artifacts introduced in this sprint: the persisted `User` entity and the transient `TokenResponse` returned on successful registration or login.
 
 ```mermaid
 classDiagram
@@ -66,6 +70,8 @@ classDiagram
 
 ### Use Case Diagram — Authentication
 
+The use case diagram lists the actions available to the two actors of this sprint: an anonymous Visitor who can register, choose their role, and log in, and an authenticated User who can view their profile and log out.
+
 ```mermaid
 graph LR
     V((Visitor))
@@ -85,6 +91,8 @@ graph LR
 ```
 
 ### Sequence Diagram — Registration
+
+This sequence traces the full registration flow, including the email-uniqueness check, password hashing, JWT issuance, and the alternate path returned when the email is already taken.
 
 ```mermaid
 sequenceDiagram
@@ -113,6 +121,8 @@ sequenceDiagram
 ```
 
 ### Sequence Diagram — Login & Token Validation
+
+This diagram covers two related flows: the login endpoint that issues a JWT, and the follow-up `/auth/me` call that demonstrates how the backend validates the bearer token on every protected request.
 
 ```mermaid
 sequenceDiagram
