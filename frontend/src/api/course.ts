@@ -532,6 +532,18 @@ export function submitFeedback(
 
 // ── AI course generation ──────────────────────────────────────────────────────
 
+export interface GenerationQuota {
+  used: number
+  limit: number | null   // null = unlimited (Pro)
+  is_pro: boolean
+  remaining: number | null
+  period: string
+}
+
+export function getGenerationQuota(token: string): Promise<GenerationQuota> {
+  return request<GenerationQuota>('/course-gen/quota', token)
+}
+
 export function uploadPdfForGeneration(
   token: string,
   file: File,

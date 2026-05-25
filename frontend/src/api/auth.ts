@@ -16,6 +16,8 @@ export interface UserOut {
   profile_image: string | null;
   university_id: string | null;
   university_name: string | null;
+  is_pro: boolean;
+  pro_until: string | null;
 }
 
 export interface UpdateProfileData {

@@ -149,13 +149,26 @@ def _validate_questions(raw: list, expected_count: int) -> List[QCMQuestion]:
     return out[:expected_count]
 
 
+PRO_ONLY_DIFFICULTIES = {"medium", "hard"}
+
+
 def generate_qcm(
     course_id: str,
     section_id: Optional[str],
     difficulty: str,
     db: Session,
+    *,
+    is_pro: bool = False,
 ) -> QCMGenerateOut:
     diff = _normalize_difficulty(difficulty)
+    if diff in PRO_ONLY_DIFFICULTIES and not is_pro:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"The '{diff}' difficulty is a Pro feature. "
+                "Upgrade to unlock medium and hard quizzes, or stay on easy."
+            ),
+        )
     cfg = DIFFICULTY_CONFIG[diff]
     cid = UUID(course_id)
     sid = UUID(section_id) if section_id else None

@@ -7,6 +7,8 @@ import {
   type QCMSubmitOut,
 } from '../api/qcm'
 import { useGamification } from '../context/GamificationContext'
+import { useAuth } from '../context/AuthContext'
+import UpgradeProModal from './UpgradeProModal'
 
 type Stage = 'pick' | 'loading' | 'quiz' | 'results' | 'error'
 
@@ -18,24 +20,34 @@ interface Props {
   onClose: () => void
 }
 
-const DIFFICULTIES: { id: QCMDifficulty; label: string; questions: number; tagline: string; color: string }[] = [
-  { id: 'easy',   label: 'Easy',   questions: 5,  tagline: 'Basic recall & definitions',     color: '#10B981' },
-  { id: 'medium', label: 'Medium', questions: 8,  tagline: 'Application & comprehension',    color: '#FF5533' },
-  { id: 'hard',   label: 'Hard',   questions: 10, tagline: 'Analysis & scenario reasoning',  color: '#A855F7' },
+const DIFFICULTIES: { id: QCMDifficulty; label: string; questions: number; tagline: string; color: string; proOnly: boolean }[] = [
+  { id: 'easy',   label: 'Easy',   questions: 5,  tagline: 'Basic recall & definitions',     color: '#10B981', proOnly: false },
+  { id: 'medium', label: 'Medium', questions: 8,  tagline: 'Application & comprehension',    color: '#FF5533', proOnly: true  },
+  { id: 'hard',   label: 'Hard',   questions: 10, tagline: 'Analysis & scenario reasoning',  color: '#A855F7', proOnly: true  },
 ]
 
 export default function QCMModal({ token, courseId, sectionId, scopeLabel, onClose }: Props) {
   const { refresh: refreshGamification } = useGamification()
+  const { user } = useAuth()
+  const isPro = !!user?.is_pro
   const [stage, setStage] = useState<Stage>('pick')
-  const [difficulty, setDifficulty] = useState<QCMDifficulty>('medium')
+  const [difficulty, setDifficulty] = useState<QCMDifficulty>('easy')
   const [questions, setQuestions] = useState<QCMQuestion[]>([])
   const [answers, setAnswers] = useState<number[]>([])
   const [currentIdx, setCurrentIdx] = useState(0)
   const [results, setResults] = useState<QCMSubmitOut | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [showUpgrade, setShowUpgrade] = useState(false)
 
   const start = async (diff: QCMDifficulty) => {
+    // Client-side gate so the upsell shows instantly; the backend still
+    // enforces the same rule with HTTP 402.
+    const cfg = DIFFICULTIES.find(d => d.id === diff)
+    if (cfg?.proOnly && !isPro) {
+      setShowUpgrade(true)
+      return
+    }
     setDifficulty(diff)
     setStage('loading')
     setErrorMsg('')
@@ -46,7 +58,13 @@ export default function QCMModal({ token, courseId, sectionId, scopeLabel, onClo
       setCurrentIdx(0)
       setStage('quiz')
     } catch (e: unknown) {
-      setErrorMsg(e instanceof Error ? e.message : 'Failed to generate quiz.')
+      const msg = e instanceof Error ? e.message : 'Failed to generate quiz.'
+      if (/pro feature|pro subscription required/i.test(msg)) {
+        setShowUpgrade(true)
+        setStage('pick')
+        return
+      }
+      setErrorMsg(msg)
       setStage('error')
     }
   }
@@ -130,27 +148,44 @@ export default function QCMModal({ token, courseId, sectionId, scopeLabel, onClo
                 Pass with at least <span className="text-emerald-400 font-semibold">70%</span>. Each attempt generates fresh questions.
               </p>
               <div className="space-y-3">
-                {DIFFICULTIES.map(d => (
-                  <button
-                    key={d.id}
-                    onClick={() => start(d.id)}
-                    className="w-full text-left p-4 rounded-2xl bg-[#1A1D25] border border-[#252830] hover:border-[#FF5533]/40 hover:bg-[#1E2028] transition-all duration-150 group"
-                  >
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2.5 mb-1">
-                          <span className="w-2 h-2 rounded-full" style={{ background: d.color }} />
-                          <p className="text-[0.92rem] font-bold text-white">{d.label}</p>
-                          <span className="text-[0.65rem] text-[#475569] font-mono">{d.questions} Qs</span>
+                {DIFFICULTIES.map(d => {
+                  const locked = d.proOnly && !isPro
+                  return (
+                    <button
+                      key={d.id}
+                      onClick={() => start(d.id)}
+                      className={`w-full text-left p-4 rounded-2xl border transition-all duration-150 group ${
+                        locked
+                          ? 'bg-[#15171D] border-[#1E2028] hover:border-[#FF5533]/40'
+                          : 'bg-[#1A1D25] border-[#252830] hover:border-[#FF5533]/40 hover:bg-[#1E2028]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2.5 mb-1 flex-wrap">
+                            <span className="w-2 h-2 rounded-full" style={{ background: d.color }} />
+                            <p className={`text-[0.92rem] font-bold ${locked ? 'text-[#94A3B8]' : 'text-white'}`}>{d.label}</p>
+                            <span className="text-[0.65rem] text-[#475569] font-mono">{d.questions} Qs</span>
+                            {locked && (
+                              <span className="text-[0.58rem] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#FF5533]/15 text-[#FF7755] border border-[#FF5533]/25 flex items-center gap-1">
+                                <svg width="9" height="9" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                                </svg>
+                                Pro
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[0.76rem] text-[#64748B]">
+                            {locked ? `${d.tagline} · Upgrade to unlock` : d.tagline}
+                          </p>
                         </div>
-                        <p className="text-[0.76rem] text-[#64748B]">{d.tagline}</p>
+                        <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#475569" strokeWidth={2} className="group-hover:stroke-[#FF5533] shrink-0 transition-colors">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
                       </div>
-                      <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#475569" strokeWidth={2} className="group-hover:stroke-[#FF5533] shrink-0 transition-colors">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                      </svg>
-                    </div>
-                  </button>
-                ))}
+                    </button>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -371,6 +406,12 @@ export default function QCMModal({ token, courseId, sectionId, scopeLabel, onClo
           )}
         </div>
       </div>
+
+      <UpgradeProModal
+        open={showUpgrade}
+        onClose={() => setShowUpgrade(false)}
+        reason="Unlock medium & hard quizzes"
+      />
     </div>
   )
 }

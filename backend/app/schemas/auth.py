@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, EmailStr
@@ -32,6 +33,8 @@ class UserOut(BaseModel):
     profile_image: Optional[str] = None
     university_id: Optional[str] = None
     university_name: Optional[str] = None
+    is_pro: bool = False
+    pro_until: Optional[datetime] = None
 
     class Config:
         from_attributes = True

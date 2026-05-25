@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { confirmPayment } from '../api/payment'
+import { confirmProSubscription } from '../api/billing'
 
 /* ── Shared shell ─────────────────────────────────────────────────────────── */
 
@@ -36,11 +37,13 @@ function Card({ children }: { children: React.ReactNode }) {
 /* ── Success ──────────────────────────────────────────────────────────────── */
 
 export function PaymentSuccessPage() {
-  const { token } = useAuth()
+  const { token, refreshUser } = useAuth()
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const sessionId = params.get('session_id') || ''
   const courseId = params.get('course_id') || ''
+  const kind = params.get('kind') || ''        // 'pro' for subscription, empty for course
+  const isProFlow = kind === 'pro'
 
   const [status, setStatus] = useState<'verifying' | 'success' | 'error'>('verifying')
   const [error, setError] = useState('')
@@ -51,13 +54,16 @@ export function PaymentSuccessPage() {
       setError('Missing session or login.')
       return
     }
-    confirmPayment(token, sessionId)
+    const promise = isProFlow
+      ? confirmProSubscription(token, sessionId).then(() => refreshUser())
+      : confirmPayment(token, sessionId)
+    promise
       .then(() => setStatus('success'))
       .catch((e: Error) => {
         setError(e.message || 'Could not confirm payment.')
         setStatus('error')
       })
-  }, [token, sessionId])
+  }, [token, sessionId, isProFlow, refreshUser])
 
   if (status === 'verifying') {
     return (
@@ -112,26 +118,42 @@ export function PaymentSuccessPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <h1 className="text-xl font-semibold text-slate-900 tracking-tight mb-1.5">Payment confirmed</h1>
-          <p className="text-sm text-slate-500">You're enrolled and ready to start learning.</p>
+          <h1 className="text-xl font-semibold text-slate-900 tracking-tight mb-1.5">
+            {isProFlow ? 'Welcome to Pro' : 'Payment confirmed'}
+          </h1>
+          <p className="text-sm text-slate-500">
+            {isProFlow
+              ? 'Your Pro features are unlocked for the next 30 days.'
+              : "You're enrolled and ready to start learning."}
+          </p>
         </div>
 
         <div className="mx-8 my-6 rounded-xl bg-slate-50 border border-slate-100 px-4 py-3.5 flex items-start gap-3">
           <div className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center shrink-0 mt-0.5">
-            <svg className="w-4 h-4 text-slate-700" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-            </svg>
+            {isProFlow ? (
+              <svg className="w-4 h-4 text-[#FF5533]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4 text-slate-700" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+              </svg>
+            )}
           </div>
           <div className="flex-1 min-w-0 text-left">
-            <p className="text-[13px] font-semibold text-slate-900 leading-tight">Course unlocked</p>
+            <p className="text-[13px] font-semibold text-slate-900 leading-tight">
+              {isProFlow ? 'Pro unlocked' : 'Course unlocked'}
+            </p>
             <p className="text-[12px] text-slate-500 mt-0.5 leading-snug">
-              Lifetime access · Receipt sent to your email by Stripe
+              {isProFlow
+                ? 'Full AI digests · Medium & hard quizzes · Unlimited PDF imports'
+                : 'Lifetime access · Receipt sent to your email by Stripe'}
             </p>
           </div>
         </div>
 
         <div className="px-8 pb-8 flex flex-col gap-2">
-          {courseId && (
+          {courseId && !isProFlow && (
             <button
               onClick={() => navigate(`/learn/${courseId}`)}
               className="w-full h-11 rounded-xl text-sm font-semibold bg-[#0C0C0F] text-white hover:bg-[#1E1E23] border-none cursor-pointer transition-colors"
@@ -141,7 +163,7 @@ export function PaymentSuccessPage() {
           )}
           <Link
             to="/dashboard"
-            className="w-full h-11 inline-flex items-center justify-center rounded-xl text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors"
+            className="w-full h-11 inline-flex items-center justify-center rounded-xl text-sm font-semibold bg-[#0C0C0F] text-white hover:bg-[#1E1E23] transition-colors"
           >
             Back to dashboard
           </Link>
@@ -157,6 +179,7 @@ export function PaymentCancelPage() {
   const location = useLocation()
   const params = new URLSearchParams(location.search)
   const courseId = params.get('course_id') || ''
+  const isProFlow = params.get('kind') === 'pro'
 
   return (
     <PageShell>
@@ -167,9 +190,13 @@ export function PaymentCancelPage() {
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </div>
-          <h1 className="text-lg font-semibold text-slate-900 tracking-tight mb-1.5">Checkout cancelled</h1>
+          <h1 className="text-lg font-semibold text-slate-900 tracking-tight mb-1.5">
+            {isProFlow ? 'Upgrade cancelled' : 'Checkout cancelled'}
+          </h1>
           <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-            No charge was made to your card. You can pick up where you left off whenever you're ready.
+            No charge was made to your card. {isProFlow
+              ? 'You can upgrade to Pro any time from the dashboard.'
+              : "You can pick up where you left off whenever you're ready."}
           </p>
 
           <div className="flex flex-col gap-2">
@@ -177,9 +204,9 @@ export function PaymentCancelPage() {
               to="/dashboard"
               className="w-full h-11 inline-flex items-center justify-center rounded-xl text-sm font-semibold bg-[#0C0C0F] text-white hover:bg-[#1E1E23] transition-colors"
             >
-              Back to courses
+              {isProFlow ? 'Back to dashboard' : 'Back to courses'}
             </Link>
-            {courseId && (
+            {courseId && !isProFlow && (
               <Link
                 to={`/dashboard?course=${courseId}`}
                 className="w-full h-11 inline-flex items-center justify-center rounded-xl text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors"

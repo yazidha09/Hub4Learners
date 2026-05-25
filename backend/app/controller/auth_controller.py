@@ -6,6 +6,7 @@ from app.models.user import User
 from app.models.university import University
 from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse, UserOut, UpdateProfileRequest
 from app.utils.security import hash_password, verify_password, create_access_token
+from app.utils.pro import is_pro_user
 
 
 def _build_user_out(user: User, db: Session) -> UserOut:
@@ -24,6 +25,8 @@ def _build_user_out(user: User, db: Session) -> UserOut:
         profile_image=user.profile_image,
         university_id=str(user.university_id) if user.university_id else None,
         university_name=university_name,
+        is_pro=is_pro_user(user),
+        pro_until=user.pro_until,
     )
 
 

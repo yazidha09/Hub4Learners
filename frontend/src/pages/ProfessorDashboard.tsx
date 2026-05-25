@@ -10,9 +10,12 @@ import {
   getMyStudents, getEnrolledCourses, enrollInCourse, unenrollFromCourse, deleteCourse, deleteSection,
   addLessonBlock, deleteLessonBlock, updateLessonBlock, getLearnerAnalytics,
   uploadPdfForGeneration, pollGenerationJob, importGeneratedCourse, regenerateSubsection,
+  getGenerationQuota,
   type CourseOut, type SubsectionOut, type LessonBlockOut, type CourseStudentsOut, type GenerationJob,
   type LearnerAnalyticsOut, type LearnerActivityPoint, type LearnerSummary,
+  type GenerationQuota,
 } from '../api/course'
+import UpgradeProModal from '../components/UpgradeProModal'
 import { listCategories, type CategoryOut } from '../api/category'
 import { createCheckoutSession } from '../api/payment'
 import FriendsMessenger from '../components/FriendsMessenger'
@@ -581,6 +584,16 @@ function CourseManager({ token, course, onBack, onRefresh }: {
   const [aiError, setAiError] = useState('')
   const aiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  /* ── Pro paywall — PDF generation quota ── */
+  const [aiQuota, setAiQuota] = useState<GenerationQuota | null>(null)
+  const [showProUpgrade, setShowProUpgrade] = useState(false)
+
+  useEffect(() => {
+    if (!showAI) return
+    // Refresh each time the modal opens so a recent Pro upgrade is reflected.
+    getGenerationQuota(token).then(setAiQuota).catch(() => setAiQuota(null))
+  }, [showAI, token])
+
   /* ── AI editor state (after generation) ── */
   const [editedResult, setEditedResult] = useState<GenerationJob['result'] | null>(null)
   const [expandedAiSection, setExpandedAiSection] = useState<number | null>(0)
@@ -599,6 +612,12 @@ function CourseManager({ token, course, onBack, onRefresh }: {
 
   const handleAIUpload = async () => {
     if (!aiFile) return
+    // Pre-check quota client-side so the upsell shows instantly without a
+    // round-trip to the server. The backend re-checks anyway.
+    if (aiQuota && !aiQuota.is_pro && aiQuota.limit !== null && aiQuota.used >= aiQuota.limit) {
+      setShowProUpgrade(true)
+      return
+    }
     setAiPhase('uploading'); setAiError('')
     try {
       const { job_id } = await uploadPdfForGeneration(token, aiFile, aiDifficulty)
@@ -616,7 +635,17 @@ function CourseManager({ token, course, onBack, onRefresh }: {
           if (job.status === 'failed') { stopPolling(); setAiError(job.error ?? 'Generation failed'); setAiPhase('error') }
         } catch { stopPolling(); setAiError('Lost connection to server'); setAiPhase('error') }
       }, 3000)
-    } catch (e: any) { setAiError(e.message); setAiPhase('error') }
+      // Refresh quota after a successful submit so the counter reflects the new job.
+      getGenerationQuota(token).then(setAiQuota).catch(() => {})
+    } catch (e: any) {
+      const msg: string = e?.message ?? 'Upload failed'
+      if (/pro|upgrade|free tier/i.test(msg)) {
+        setAiPhase('idle')
+        setShowProUpgrade(true)
+        return
+      }
+      setAiError(msg); setAiPhase('error')
+    }
   }
 
   const handleAIImport = async () => {
@@ -884,6 +913,56 @@ function CourseManager({ token, course, onBack, onRefresh }: {
               {/* IDLE / UPLOADING phase — form */}
               {(aiPhase === 'idle' || aiPhase === 'uploading') && (
                 <div className="space-y-4">
+                  {/* Quota / Pro status banner */}
+                  {aiQuota && (
+                    aiQuota.is_pro ? (
+                      <div className="bg-gradient-to-r from-[#FF5533]/10 to-violet-50 border border-[#FF5533]/25 rounded-xl px-3 py-2.5 flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-lg bg-[#FF5533]/15 text-[#FF5533] border border-[#FF5533]/30 flex items-center justify-center shrink-0">
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                          </svg>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-[#FF5533]">Pro · Unlimited generations</p>
+                          <p className="text-[11px] text-slate-500">You've used {aiQuota.used} this month.</p>
+                        </div>
+                      </div>
+                    ) : (() => {
+                      const limit = aiQuota.limit ?? 0
+                      const used = aiQuota.used
+                      const remaining = aiQuota.remaining ?? Math.max(0, limit - used)
+                      const exhausted = remaining <= 0
+                      const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0
+                      return (
+                        <div className={`rounded-xl px-3 py-2.5 border ${exhausted ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'}`}>
+                          <div className="flex items-center justify-between gap-3 mb-2">
+                            <div className="min-w-0">
+                              <p className={`text-xs font-bold ${exhausted ? 'text-rose-700' : 'text-slate-900'}`}>
+                                {exhausted ? 'Monthly limit reached' : `${remaining} of ${limit} left this month`}
+                              </p>
+                              <p className="text-[11px] text-slate-500">
+                                Free tier · resets on the 1st
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setShowProUpgrade(true)}
+                              className="shrink-0 px-2.5 py-1 rounded-md bg-[#FF5533] text-white text-[11px] font-semibold hover:bg-[#E64422] transition-colors"
+                            >
+                              Upgrade
+                            </button>
+                          </div>
+                          <div className="h-1.5 bg-white rounded-full overflow-hidden border border-slate-200">
+                            <div
+                              className={`h-full rounded-full transition-all ${exhausted ? 'bg-rose-500' : 'bg-[#FF5533]'}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                      )
+                    })()
+                  )}
+
                   {/* PDF drop zone */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2">PDF file</label>
@@ -918,13 +997,24 @@ function CourseManager({ token, course, onBack, onRefresh }: {
                     </div>
                   </div>
 
-                  <button
-                    onClick={handleAIUpload}
-                    disabled={!aiFile || aiPhase === 'uploading'}
-                    className="w-full py-3 rounded-xl text-sm font-bold bg-violet-600 text-white hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400 transition-all duration-200"
-                  >
-                    {aiPhase === 'uploading' ? 'Uploading…' : 'Start Generation'}
-                  </button>
+                  {(() => {
+                    const exhausted = !!aiQuota && !aiQuota.is_pro && aiQuota.limit !== null && aiQuota.used >= aiQuota.limit
+                    return (
+                      <button
+                        onClick={exhausted ? () => setShowProUpgrade(true) : handleAIUpload}
+                        disabled={(!aiFile && !exhausted) || aiPhase === 'uploading'}
+                        className={`w-full py-3 rounded-xl text-sm font-bold transition-all duration-200 ${
+                          exhausted
+                            ? 'bg-[#FF5533] text-white hover:bg-[#E64422]'
+                            : 'bg-violet-600 text-white hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400'
+                        }`}
+                      >
+                        {exhausted
+                          ? 'Upgrade to Pro for more generations'
+                          : aiPhase === 'uploading' ? 'Uploading…' : 'Start Generation'}
+                      </button>
+                    )
+                  })()}
                 </div>
               )}
 
@@ -1100,6 +1190,12 @@ function CourseManager({ token, course, onBack, onRefresh }: {
           </div>
         </div>
       )}
+
+      <UpgradeProModal
+        open={showProUpgrade}
+        onClose={() => setShowProUpgrade(false)}
+        reason="Unlock unlimited PDF-to-course generations"
+      />
 
       {current.sections.length === 0 ? (
         <div className="text-center py-12 mb-6 bg-white rounded-2xl border border-dashed border-slate-200">

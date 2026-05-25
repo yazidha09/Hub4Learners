@@ -33,6 +33,7 @@ from app.utils.rag import (
     index_course_sync,
     search_course,
 )
+from app.utils.pro import is_pro_user_id
 from app.utils.security import get_current_user
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -174,6 +175,7 @@ def qcm_generate(
         section_id=body.section_id,
         difficulty=body.difficulty,
         db=db,
+        is_pro=is_pro_user_id(current_user["sub"], db),
     )
 
 

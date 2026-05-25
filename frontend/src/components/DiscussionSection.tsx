@@ -16,6 +16,8 @@ import {
   type DiscussionSort,
   type DiscussionSummaryOut,
 } from '../api/discussions'
+import { useAuth } from '../context/AuthContext'
+import UpgradeProModal from './UpgradeProModal'
 
 interface Props {
   open: boolean
@@ -434,12 +436,14 @@ function PostCard({
 
 /* ─── AI summary card ─── */
 function SummaryCard({
-  summary, loading, onRegenerate, regenerating,
+  summary, loading, onRegenerate, regenerating, isPro, onUpgradeClick,
 }: {
   summary: DiscussionSummaryOut | null
   loading: boolean
   onRegenerate: () => void
   regenerating: boolean
+  isPro: boolean
+  onUpgradeClick: () => void
 }) {
   const [open, setOpen] = useState(false)
 
@@ -454,6 +458,8 @@ function SummaryCard({
 
   const hasSummary = !!summary?.summary_md
   const canGen = !!summary?.can_generate
+  const isTruncated = !!summary?.is_truncated
+  const requiresPro = !!summary?.requires_pro
 
   return (
     <div className="rounded-xl bg-gradient-to-br from-[#1A0F0A] to-[#111318] border border-[#FF5533]/20 overflow-hidden">
@@ -467,11 +473,18 @@ function SummaryCard({
           </svg>
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[0.6rem] font-bold uppercase tracking-[0.12em] text-[#FF7755]">AI digest</p>
+          <p className="text-[0.6rem] font-bold uppercase tracking-[0.12em] text-[#FF7755] flex items-center gap-1.5">
+            AI digest
+            {!isPro && (
+              <span className="text-[0.5rem] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#FF5533]/15 text-[#FF7755] border border-[#FF5533]/25">
+                Pro preview
+              </span>
+            )}
+          </p>
           <p className="text-[0.74rem] text-[#CBD5E1] truncate">
             {hasSummary
               ? `${summary?.is_stale ? 'Update available · ' : ''}from ${summary?.post_count_at_gen ?? 0} posts`
-              : canGen ? 'Generate a digest of common questions' : 'Unlocks at 3+ posts'}
+              : canGen ? (isPro ? 'Generate a digest of common questions' : 'Pro · Generate a digest of common questions') : 'Unlocks at 3+ posts'}
           </p>
         </div>
         <svg
@@ -486,36 +499,65 @@ function SummaryCard({
         <div className="px-3 pb-3 border-t border-[#FF5533]/15">
           {hasSummary ? (
             <div className="pt-2.5">
-              <PostMarkdown source={summary!.summary_md!} />
-              <div className="mt-2.5 flex items-center justify-between gap-2 text-[0.66rem] text-[#475569]">
-                <span>Generated {summary?.generated_at ? timeAgo(summary.generated_at) : '—'}</span>
-                <button
-                  onClick={onRegenerate}
-                  disabled={regenerating}
-                  className="text-[0.7rem] font-semibold text-[#FF7755] hover:text-[#FF5533] disabled:opacity-50"
-                >
-                  {regenerating ? 'Regenerating…' : 'Regenerate'}
-                </button>
+              <div className={isTruncated ? 'relative' : ''}>
+                <PostMarkdown source={summary!.summary_md!} />
+                {isTruncated && (
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-[#0E1015] to-transparent" />
+                )}
               </div>
+              {isTruncated ? (
+                <div className="mt-3 rounded-lg bg-[#FF5533]/8 border border-[#FF5533]/25 px-3 py-2.5 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[0.74rem] font-semibold text-[#FF7755] leading-tight">Get the full digest</p>
+                    <p className="text-[0.66rem] text-[#94A3B8] mt-0.5 leading-snug">
+                      Pro unlocks the complete summary + on-demand refresh.
+                    </p>
+                  </div>
+                  <button
+                    onClick={onUpgradeClick}
+                    className="shrink-0 px-3 py-1.5 rounded-md bg-[#FF5533] text-white text-[0.7rem] font-semibold hover:bg-[#E64422] transition-colors"
+                  >
+                    Upgrade
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-2.5 flex items-center justify-between gap-2 text-[0.66rem] text-[#475569]">
+                  <span>Generated {summary?.generated_at ? timeAgo(summary.generated_at) : '—'}</span>
+                  <button
+                    onClick={isPro ? onRegenerate : onUpgradeClick}
+                    disabled={regenerating}
+                    className="text-[0.7rem] font-semibold text-[#FF7755] hover:text-[#FF5533] disabled:opacity-50"
+                  >
+                    {regenerating ? 'Regenerating…' : isPro ? 'Regenerate' : 'Upgrade to regenerate'}
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="pt-2.5 flex items-center justify-between gap-3">
               <p className="text-[0.74rem] text-[#94A3B8]">
-                {canGen ? 'Generate a digest of common questions and top answers.' : '3+ posts unlock this digest.'}
+                {canGen
+                  ? (isPro
+                      ? 'Generate a digest of common questions and top answers.'
+                      : 'Pro members can generate an AI digest of common questions and top answers.')
+                  : '3+ posts unlock this digest.'}
               </p>
               {canGen && (
                 <button
-                  onClick={onRegenerate}
+                  onClick={isPro ? onRegenerate : onUpgradeClick}
                   disabled={regenerating}
                   className="shrink-0 px-2.5 py-1 rounded-md bg-[#FF5533] text-white text-[0.7rem] font-semibold hover:bg-[#E64422] disabled:opacity-50 transition-colors"
                 >
-                  {regenerating ? 'Generating…' : 'Generate'}
+                  {regenerating ? 'Generating…' : isPro ? 'Generate' : 'Upgrade'}
                 </button>
               )}
             </div>
           )}
         </div>
       )}
+      {/* Visual marker so the suppress-warning isn't a dead var if requiresPro
+          drifts away from is_truncated in the future. */}
+      {requiresPro && !hasSummary && null}
     </div>
   )
 }
@@ -524,6 +566,9 @@ function SummaryCard({
 export default function DiscussionSection({
   open, onClose, subsectionId, lessonTitle, token, onCountChange,
 }: Props) {
+  const { user } = useAuth()
+  const isPro = !!user?.is_pro
+  const [showUpgrade, setShowUpgrade] = useState(false)
   const [posts, setPosts] = useState<DiscussionPostOut[]>([])
   const [total, setTotal] = useState(0)
   const [hasMore, setHasMore] = useState(false)
@@ -651,7 +696,13 @@ export default function DiscussionSection({
       const s = await regenerateDiscussionSummary(token, subsectionId)
       setSummary(s)
     } catch (e: any) {
-      alert(e?.message ?? 'Failed to generate summary')
+      // 402 → Pro required: open the upgrade modal instead of an alert.
+      const msg: string = e?.message ?? 'Failed to generate summary'
+      if (/pro subscription required/i.test(msg)) {
+        setShowUpgrade(true)
+      } else {
+        alert(msg)
+      }
     } finally {
       setSummaryRegenerating(false)
     }
@@ -717,6 +768,8 @@ export default function DiscussionSection({
             loading={summaryLoading}
             onRegenerate={handleRegenerateSummary}
             regenerating={summaryRegenerating}
+            isPro={isPro}
+            onUpgradeClick={() => setShowUpgrade(true)}
           />
           <Composer
             value={composer}
@@ -772,6 +825,12 @@ export default function DiscussionSection({
           </div>
         </div>
       </div>
+
+      <UpgradeProModal
+        open={showUpgrade}
+        onClose={() => setShowUpgrade(false)}
+        reason="Unlock the full AI discussion digest"
+      />
     </div>
   )
 }

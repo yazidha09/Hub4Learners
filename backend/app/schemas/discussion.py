@@ -69,3 +69,5 @@ class DiscussionSummaryOut(BaseModel):
     post_count_at_gen: int = 0
     is_stale: bool = False
     can_generate: bool = False
+    is_truncated: bool = False
+    requires_pro: bool = False

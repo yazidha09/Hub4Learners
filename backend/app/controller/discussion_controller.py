@@ -499,7 +499,35 @@ def _is_summary_stale(
     return False
 
 
-def get_summary(subsection_id: UUID, db: Session) -> DiscussionSummaryOut:
+# Free-tier preview cap: first ~2 sentences of the summary, before any
+# Pro upsell kicks in. Anything more is replaced with a fade-out marker.
+_FREE_SUMMARY_PREVIEW_CHARS = 220
+
+
+def _truncate_summary_md(summary_md: str) -> str:
+    if not summary_md:
+        return summary_md
+    text = summary_md.strip()
+    if len(text) <= _FREE_SUMMARY_PREVIEW_CHARS:
+        # Even a short summary gets a soft cap so free users always see the
+        # upsell line — otherwise short threads would hide that Pro exists.
+        return text + "\n\n_…upgrade to Pro to see the full digest._"
+    snippet = text[:_FREE_SUMMARY_PREVIEW_CHARS].rstrip()
+    # Cut on the last sentence boundary if there is one, so the preview reads cleanly.
+    for boundary in (". ", "? ", "! ", "\n"):
+        idx = snippet.rfind(boundary)
+        if idx >= 60:
+            snippet = snippet[: idx + 1]
+            break
+    return snippet.rstrip() + "\n\n_…upgrade to Pro to see the full digest._"
+
+
+def get_summary(
+    subsection_id: UUID,
+    db: Session,
+    *,
+    is_pro: bool = False,
+) -> DiscussionSummaryOut:
     sub, _ = _resolve_subsection(subsection_id, db)
     summary = (
         db.query(DiscussionSummary)
@@ -515,17 +543,35 @@ def get_summary(subsection_id: UUID, db: Session) -> DiscussionSummaryOut:
         .scalar()
         or 0
     )
+    raw_md = summary.summary_md if summary else None
+    truncated = False
+    display_md = raw_md
+    if raw_md and not is_pro:
+        display_md = _truncate_summary_md(raw_md)
+        truncated = display_md != raw_md
     return DiscussionSummaryOut(
         subsection_id=sub.id,
-        summary_md=summary.summary_md if summary else None,
+        summary_md=display_md,
         generated_at=summary.generated_at if summary else None,
         post_count_at_gen=summary.post_count_at_gen if summary else 0,
         is_stale=_is_summary_stale(summary, total),
         can_generate=total >= _SUMMARY_MIN_POSTS,
+        is_truncated=truncated,
+        requires_pro=not is_pro,
     )
 
 
-def regenerate_summary(subsection_id: UUID, db: Session) -> DiscussionSummaryOut:
+def regenerate_summary(
+    subsection_id: UUID,
+    db: Session,
+    *,
+    is_pro: bool = False,
+) -> DiscussionSummaryOut:
+    if not is_pro:
+        raise HTTPException(
+            status_code=402,
+            detail="Pro subscription required to generate or refresh the AI digest.",
+        )
     sub, course = _resolve_subsection(subsection_id, db)
 
     parents = (

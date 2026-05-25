@@ -41,6 +41,8 @@ export interface DiscussionSummaryOut {
   post_count_at_gen: number
   is_stale: boolean
   can_generate: boolean
+  is_truncated: boolean
+  requires_pro: boolean
 }
 
 export interface DiscussionVoteOut {

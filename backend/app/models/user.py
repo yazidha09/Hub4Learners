@@ -26,6 +26,13 @@ class User(SQLModel, table=True):
         sa_column=Column(ForeignKey("universities.id", ondelete="SET NULL"), nullable=True, index=True),
     )
 
+    # Pro subscription expiry. NULL or past → free tier. Each Stripe payment
+    # extends this by 30 days (one-off-checkout-as-subscription model).
+    pro_until: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime, nullable=True, index=True),
+    )
+
     created_at: datetime = Field(
         sa_column=Column(DateTime, nullable=False, server_default=func.current_timestamp())
     )

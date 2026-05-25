@@ -53,6 +53,7 @@ from app.routes.ws_routes import router as ws_router
 from app.routes.course_generation_routes import router as course_gen_router
 from app.routes.announcement_routes import router as announcement_router
 from app.routes.payment_routes import router as payment_router
+from app.routes.billing_routes import router as billing_router
 from app.routes.gamification_routes import router as gamification_router
 from app.routes.discussion_routes import router as discussion_router
 from app.routes.public_routes import router as public_router
@@ -467,6 +468,9 @@ def on_startup():
             "CREATE INDEX IF NOT EXISTS ix_courses_published ON courses(is_published)",
             "CREATE INDEX IF NOT EXISTS ix_courses_professor ON courses(professor_id)",
             "CREATE INDEX IF NOT EXISTS ix_course_feedback_user ON course_feedback(user_id)",
+            # ── Pro subscription expiry (paywall) ─────────────────────────────
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS pro_until TIMESTAMP",
+            "CREATE INDEX IF NOT EXISTS ix_users_pro_until ON users(pro_until)",
         ]
         for sql in migrations:
             conn.execute(sa.text(sql))
@@ -492,6 +496,7 @@ app.include_router(notification_router,      prefix="/api")
 app.include_router(course_gen_router,        prefix="/api")
 app.include_router(announcement_router,      prefix="/api")
 app.include_router(payment_router,           prefix="/api")
+app.include_router(billing_router,           prefix="/api")
 app.include_router(gamification_router,      prefix="/api")
 app.include_router(discussion_router,        prefix="/api")
 app.include_router(public_router,            prefix="/api")

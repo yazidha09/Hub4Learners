@@ -10,6 +10,7 @@ from app.schemas.discussion import (
     DiscussionPostUpdate, DiscussionReportCreate, DiscussionSummaryOut,
     DiscussionVoteOut,
 )
+from app.utils.pro import is_pro_user_id
 from app.utils.security import get_current_user
 
 router = APIRouter(prefix="/discussions", tags=["Discussions"])
@@ -132,16 +133,18 @@ def report_discussion_post(
 @router.get("/subsections/{subsection_id}/summary", response_model=DiscussionSummaryOut)
 def get_discussion_summary(
     subsection_id: UUID,
-    _: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return discussion_controller.get_summary(subsection_id=subsection_id, db=db)
+    is_pro = is_pro_user_id(current_user["sub"], db)
+    return discussion_controller.get_summary(subsection_id=subsection_id, db=db, is_pro=is_pro)
 
 
 @router.post("/subsections/{subsection_id}/summary/regenerate", response_model=DiscussionSummaryOut)
 def regenerate_discussion_summary(
     subsection_id: UUID,
-    _: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return discussion_controller.regenerate_summary(subsection_id=subsection_id, db=db)
+    is_pro = is_pro_user_id(current_user["sub"], db)
+    return discussion_controller.regenerate_summary(subsection_id=subsection_id, db=db, is_pro=is_pro)

@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.controller import course_generation_controller as ctrl
@@ -12,6 +13,7 @@ from app.database import get_db
 from app.models.course_section import CourseSection
 from app.models.course_subsection import CourseSubsection
 from app.models.courses import Course
+from app.models.generated_course import GeneratedCourse
 from app.models.lesson_block import LessonBlock
 from app.schemas.course_generation import (
     JobStatusResponse,
@@ -21,6 +23,7 @@ from app.schemas.course_generation import (
     UploadPDFResponse,
 )
 from app.utils.course_generator import generate_quiz, _content_prompt, _call_sync
+from app.utils.pro import is_pro_user_id
 from app.utils.rag import index_course_sync
 from app.utils.security import get_current_user, require_role
 
@@ -28,13 +31,53 @@ router = APIRouter(prefix="/course-gen", tags=["course-generation"])
 
 _MAX_PDF_BYTES = 20 * 1024 * 1024   # 20 MB hard cap
 
+# Free-tier monthly cap on AI PDF→course generations. Counts every job a
+# professor created in the current calendar month, regardless of status —
+# this stops users from re-running a failing PDF to bypass the limit.
+_FREE_PDF_GENERATIONS_PER_MONTH = 2
+
 
 class ImportOverrideBody(BaseModel):
     result: Optional[Dict[str, Any]] = None
 _VALID_DIFFICULTIES = {"beginner", "intermediate", "advanced"}
 
 
+def _month_start_utc() -> datetime:
+    now = datetime.utcnow()
+    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def _count_jobs_this_month(user_id: str, db: Session) -> int:
+    return (
+        db.query(func.count(GeneratedCourse.id))
+        .filter(
+            GeneratedCourse.user_id == uuid.UUID(user_id),
+            GeneratedCourse.created_at >= _month_start_utc(),
+        )
+        .scalar()
+        or 0
+    )
+
+
 # ── POST /api/course-gen/upload ───────────────────────────────────────────────
+
+@router.get("/quota")
+def get_generation_quota(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_role("professor")),
+):
+    """Return the current month's generation usage for the calling professor.
+    `limit` is null for Pro users (unlimited)."""
+    is_pro = is_pro_user_id(current_user["sub"], db)
+    used = _count_jobs_this_month(current_user["sub"], db)
+    return {
+        "used": used,
+        "limit": None if is_pro else _FREE_PDF_GENERATIONS_PER_MONTH,
+        "is_pro": is_pro,
+        "remaining": None if is_pro else max(0, _FREE_PDF_GENERATIONS_PER_MONTH - used),
+        "period": "month",
+    }
+
 
 @router.post("/upload", response_model=UploadPDFResponse, status_code=202)
 async def upload_pdf(
@@ -55,6 +98,19 @@ async def upload_pdf(
 
     if difficulty not in _VALID_DIFFICULTIES:
         difficulty = "intermediate"
+
+    # Free-tier monthly quota gate — counted BEFORE the job row is created
+    # so a 402 response never leaves an orphan job in the table.
+    if not is_pro_user_id(current_user["sub"], db):
+        used = _count_jobs_this_month(current_user["sub"], db)
+        if used >= _FREE_PDF_GENERATIONS_PER_MONTH:
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"Free tier allows {_FREE_PDF_GENERATIONS_PER_MONTH} PDF-to-course "
+                    f"generations per month. Upgrade to Pro for unlimited generations."
+                ),
+            )
 
     job = ctrl.create_job(
         user_id=current_user["sub"],
