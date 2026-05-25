@@ -15,7 +15,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from sqlmodel import SQLModel
 
 from app.database import engine, SessionLocal
-from app.models.region import Region            # noqa: F401 – must be before University
 from app.models.university import University    # noqa: F401 – must be before User FK refs
 from app.models.user import User                # noqa: F401
 from app.models.category import Category        # noqa: F401
@@ -144,8 +143,11 @@ def on_startup():
             """,
             # ── Hierarchy columns ────────────────────────────────────────────
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS university_id UUID REFERENCES universities(id) ON DELETE SET NULL",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS region_id UUID REFERENCES regions(id) ON DELETE SET NULL",
-# ── Data migration: admin → super_admin (idempotent) ─────────────
+            # ── Region removal: drop the region_id FKs and the regions table ─
+            "ALTER TABLE users DROP COLUMN IF EXISTS region_id CASCADE",
+            "ALTER TABLE universities DROP COLUMN IF EXISTS region_id CASCADE",
+            "DROP TABLE IF EXISTS regions CASCADE",
+            # ── Data migration: admin → super_admin (idempotent) ─────────────
             "UPDATE users SET role = 'super_admin' WHERE role = 'admin'",
             # ── University join requests table ────────────────────────────────
             """

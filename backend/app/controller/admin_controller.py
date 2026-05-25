@@ -101,7 +101,6 @@ def _user_dict(u: User) -> dict:
         "role": u.role,
         "is_active": u.is_active,
         "university_id": str(u.university_id) if u.university_id else None,
-        "region_id": str(u.region_id) if u.region_id else None,
         "created_at": u.created_at.isoformat() if u.created_at else None,
     }
 

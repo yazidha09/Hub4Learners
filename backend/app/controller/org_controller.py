@@ -5,16 +5,14 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models.region import Region
 from app.models.university import University
 from app.models.university_join_request import UniversityJoinRequest
 from app.models.user import User
 from app.schemas.org import (
+    AssignUserUniversity,
     CreateAdminRequest,
     JoinRequestCreate,
     JoinRequestOut,
-    RegionCreate,
-    RegionOut,
     UniversityCreate,
     UniversityOut,
 )
@@ -23,88 +21,28 @@ from app.utils.security import hash_password, ROLE_RANK
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _region_out(region: Region, db: Session) -> RegionOut:
-    count = db.query(University).filter(University.region_id == region.id).count()
-    return RegionOut(
-        id=str(region.id),
-        name=region.name,
-        code=region.code,
-        created_by=str(region.created_by) if region.created_by else None,
-        created_at=region.created_at,
-        university_count=count,
-    )
-
-
-def _university_out(uni: University, db: Session) -> UniversityOut:
-    region = db.query(Region).filter(Region.id == uni.region_id).first()
+def _university_out(uni: University) -> UniversityOut:
     return UniversityOut(
         id=str(uni.id),
         name=uni.name,
-        region_id=str(uni.region_id),
-        region_name=region.name if region else None,
         created_by=str(uni.created_by) if uni.created_by else None,
         created_at=uni.created_at,
     )
 
 
-# ── Regions ────────────────────────────────────────────────────────────────────
-
-def list_regions(db: Session) -> List[RegionOut]:
-    regions = db.query(Region).order_by(Region.name).all()
-    return [_region_out(r, db) for r in regions]
-
-
-def create_region(actor: dict, data: RegionCreate, db: Session) -> RegionOut:
-    if data.code:
-        existing = db.query(Region).filter(Region.code == data.code).first()
-        if existing:
-            raise HTTPException(status_code=409, detail="Region code already exists")
-
-    region = Region(name=data.name, code=data.code, created_by=UUID(actor["sub"]))
-    db.add(region)
-    db.commit()
-    db.refresh(region)
-    return _region_out(region, db)
-
-
-def delete_region(actor: dict, region_id: str, db: Session) -> dict:
-    region = db.query(Region).filter(Region.id == UUID(region_id)).first()
-    if not region:
-        raise HTTPException(status_code=404, detail="Region not found")
-    # RESTRICT: check for universities first
-    uni_count = db.query(University).filter(University.region_id == region.id).count()
-    if uni_count > 0:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot delete region with {uni_count} university(ies). Remove them first.",
-        )
-    db.delete(region)
-    db.commit()
-    return {"detail": "Region deleted"}
-
-
 # ── Universities ───────────────────────────────────────────────────────────────
 
-def list_universities(actor: dict, db: Session, region_id: str | None = None) -> List[UniversityOut]:
-    query = db.query(University)
-
-    if region_id:
-        query = query.filter(University.region_id == UUID(region_id))
-
-    unis = query.order_by(University.name).all()
-    return [_university_out(u, db) for u in unis]
+def list_universities(actor: dict, db: Session) -> List[UniversityOut]:
+    unis = db.query(University).order_by(University.name).all()
+    return [_university_out(u) for u in unis]
 
 
 def create_university(actor: dict, data: UniversityCreate, db: Session) -> UniversityOut:
-    region = db.query(Region).filter(Region.id == UUID(data.region_id)).first()
-    if not region:
-        raise HTTPException(status_code=404, detail="Region not found")
-
-    uni = University(name=data.name, region_id=UUID(data.region_id), created_by=UUID(actor["sub"]))
+    uni = University(name=data.name, created_by=UUID(actor["sub"]))
     db.add(uni)
     db.commit()
     db.refresh(uni)
-    return _university_out(uni, db)
+    return _university_out(uni)
 
 
 def delete_university(actor: dict, university_id: str, db: Session) -> dict:
@@ -139,7 +77,6 @@ def create_university_admin(actor: dict, data: CreateAdminRequest, db: Session) 
         password_hash=hash_password(data.password),
         role="university_admin",
         university_id=UUID(data.university_id),
-        region_id=uni.region_id,
     )
     db.add(user)
     db.commit()
@@ -173,12 +110,44 @@ def create_professor(actor: dict, data: CreateAdminRequest, db: Session) -> dict
         role="professor",
         is_verified=True,
         university_id=UUID(university_id),
-        region_id=uni.region_id,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
     return {"id": str(user.id), "full_name": user.full_name, "email": user.email, "role": user.role}
+
+
+def assign_user_university(actor: dict, user_id: str, data: AssignUserUniversity, db: Session) -> dict:
+    """super_admin assigns/reassigns any non-super_admin user to a university (or clears it)."""
+    user = db.query(User).filter(User.id == UUID(user_id)).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Can't manage peers or higher — protects super_admins from being reassigned
+    actor_rank = ROLE_RANK.get(actor["role"], -1)
+    if ROLE_RANK.get(user.role, -1) >= actor_rank:
+        raise HTTPException(status_code=403, detail="Cannot modify a user with equal or higher rank")
+
+    new_uni_id: Optional[UUID] = None
+    if data.university_id:
+        uni = db.query(University).filter(University.id == UUID(data.university_id)).first()
+        if not uni:
+            raise HTTPException(status_code=404, detail="University not found")
+        new_uni_id = uni.id
+    elif user.role == "university_admin":
+        # A university_admin without a university would be unable to manage anyone
+        raise HTTPException(status_code=400, detail="university_id is required for a university_admin")
+
+    user.university_id = new_uni_id
+    db.commit()
+    db.refresh(user)
+    return {
+        "id": str(user.id),
+        "full_name": user.full_name,
+        "email": user.email,
+        "role": user.role,
+        "university_id": str(user.university_id) if user.university_id else None,
+    }
 
 
 def assign_professor_to_university(actor: dict, professor_id: str, university_id: str, db: Session) -> dict:
@@ -199,7 +168,6 @@ def assign_professor_to_university(actor: dict, professor_id: str, university_id
             raise HTTPException(status_code=403, detail="University is not yours")
 
     prof.university_id = UUID(university_id)
-    prof.region_id = uni.region_id
     db.commit()
     db.refresh(prof)
     return {"id": str(prof.id), "full_name": prof.full_name, "university_id": university_id}
@@ -304,8 +272,6 @@ def review_join_request(actor: dict, request_id: str, action: str, db: Session) 
         prof = db.query(User).filter(User.id == req.professor_id).first()
         if prof:
             prof.university_id = req.university_id
-            uni = db.query(University).filter(University.id == req.university_id).first()
-            prof.region_id = uni.region_id if uni else None
             prof.is_verified = True
 
         # Auto-reject any other pending requests from the same professor

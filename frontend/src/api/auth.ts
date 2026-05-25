@@ -15,9 +15,7 @@ export interface UserOut {
   speciality: string | null;
   profile_image: string | null;
   university_id: string | null;
-  region_id: string | null;
   university_name: string | null;
-  region_name: string | null;
 }
 
 export interface UpdateProfileData {

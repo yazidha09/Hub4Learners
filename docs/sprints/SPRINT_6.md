@@ -41,7 +41,7 @@ The final sprint completes Hub4Learners with monetisation, insight, and governan
 | US-6.11 | High | As an admin, I can change a user's role and the user is notified | T-6.11.1: Role change endpoint · T-6.11.2: Notification push |
 | US-6.12 | Medium | As an admin, I can list every course, toggle publish state, and (super admin) delete courses | T-6.12.1: Admin course endpoints |
 | US-6.13 | Medium | As a university admin, I can broadcast an announcement to my university | T-6.13.1: Announcement endpoint · T-6.13.2: Fan-out notifications |
-| US-6.14 | High | As a super admin, I can manage Regions and Universities | T-6.14.1: Region & University CRUD · T-6.14.2: Admin panel UI |
+| US-6.14 | High | As a super admin, I can manage Universities | T-6.14.1: University CRUD · T-6.14.2: Admin panel UI |
 | US-6.15 | High | As a professor, I can submit a request to join a university | T-6.15.1: Join request form · T-6.15.2: Persist request |
 | US-6.16 | High | As a university admin, I can review (approve or reject) professor join requests for my university | T-6.16.1: Review endpoint · T-6.16.2: Pending requests UI · T-6.16.3: Notify professor |
 
@@ -74,7 +74,7 @@ graph TD
 
 ### Class Diagram — Payments, Analytics & Admin
 
-The class diagram revisits the entities touched by this sprint — Course and Enrollment on the payments side, User and Announcement on the admin side — plus the three organisation-scoped models (Region, University, UniversityJoinRequest) carried into this sprint from earlier scope discussions.
+The class diagram revisits the entities touched by this sprint — Course and Enrollment on the payments side, User and Announcement on the admin side — plus the organisation models (University, UniversityJoinRequest) carried into this sprint from earlier scope discussions.
 
 ```mermaid
 classDiagram
@@ -106,15 +106,9 @@ classDiagram
         string body
     }
 
-    class Region {
-        UUID id
-        string name
-    }
-
     class University {
         UUID id
         string name
-        UUID region_id
     }
 
     class UniversityJoinRequest {
@@ -128,7 +122,6 @@ classDiagram
     Enrollment "*" --> "1" Course
     Enrollment "*" --> "1" User
     Announcement "*" --> "1" University
-    University "*" --> "1" Region
     User "*" --> "0..1" University
     UniversityJoinRequest "*" --> "1" User
     UniversityJoinRequest "*" --> "1" University
@@ -136,7 +129,7 @@ classDiagram
 
 ### Use Case Diagram — Payments, Analytics & Admin
 
-The use case diagram spans the four roles of the platform: students buy and confirm payment, professors and learners read their analytics, and the two admin tiers manage users, courses, regions, universities, announcements, and join requests at the appropriate scope.
+The use case diagram spans the four roles of the platform: students buy and confirm payment, professors and learners read their analytics, and the two admin tiers manage users, courses, universities, announcements, and join requests at the appropriate scope.
 
 ```mermaid
 graph LR
@@ -156,7 +149,7 @@ graph LR
     UC9([Manage Courses])
     UC10([Delete Course])
     UC11([Post Announcement])
-    UC12([Manage Regions & Universities])
+    UC12([Manage Universities])
     UC13([Submit Join Request])
     UC14([Review Join Requests])
 

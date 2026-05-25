@@ -11,9 +11,6 @@ class University(SQLModel, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     name: str = Field(sa_column=Column(String(255), nullable=False))
-    region_id: UUID = Field(
-        sa_column=Column(ForeignKey("regions.id", ondelete="RESTRICT"), nullable=False, index=True)
-    )
     created_by: Optional[UUID] = Field(
         default=None,
         sa_column=Column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True),

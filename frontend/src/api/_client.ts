@@ -80,10 +80,19 @@ export function cachedGet<T>(path: string, token?: string, ttlMs = 15_000): Prom
 export function invalidate(prefix: string): void {
   // Match against the path segment of the cache key. Prefix-based so callers
   // can wipe `/courses/${id}` and its subresources in one shot.
-  for (const key of Array.from(cache.keys())) {
+  // We also drop matching `inflight` entries: otherwise a GET that started
+  // BEFORE the mutation can be re-shared by the post-mutation refresh and
+  // hand back pre-mutation data (then re-cache it).
+  const matches = (key: string): boolean => {
     const colonIdx = key.indexOf(':', 2)
     const path = key.slice(colonIdx + 1)
-    if (path.startsWith(prefix)) cache.delete(key)
+    return path.startsWith(prefix)
+  }
+  for (const key of Array.from(cache.keys())) {
+    if (matches(key)) cache.delete(key)
+  }
+  for (const key of Array.from(inflight.keys())) {
+    if (matches(key)) inflight.delete(key)
   }
 }
 

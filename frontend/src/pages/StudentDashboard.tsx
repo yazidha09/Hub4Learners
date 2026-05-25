@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
@@ -110,7 +110,6 @@ function UniversityCard({ token }: { token: string }) {
         <div>
           <p className="text-[0.65rem] font-bold tracking-[0.12em] uppercase text-[#94A3B8] mb-0.5">My University</p>
           <p className="text-[0.88rem] font-semibold text-[#0C0C0F]">{user.university_name}</p>
-          {user.region_name && <p className="text-xs text-[#94A3B8]">{user.region_name}</p>}
         </div>
         <button
           onClick={() => { setSelected(user.university_id ?? ''); setEditing(true) }}
@@ -136,7 +135,7 @@ function UniversityCard({ token }: { token: string }) {
         >
           <option value="">Not assigned</option>
           {unis.map(u => (
-            <option key={u.id} value={u.id}>{u.name}{u.region_name ? ` · ${u.region_name}` : ''}</option>
+            <option key={u.id} value={u.id}>{u.name}</option>
           ))}
         </select>
         <button
@@ -224,9 +223,16 @@ function FileUploadField({
 }
 
 /* ── Browse Courses Section ── */
-function BrowseCoursesSection({ token }: { token: string }) {
+function BrowseCoursesSection({
+  token,
+  enrolled,
+  refreshEnrolled,
+}: {
+  token: string
+  enrolled: CourseOut[]
+  refreshEnrolled: () => Promise<void>
+}) {
   const [courses, setCourses] = useState<CourseOut[]>([])
-  const [enrolled, setEnrolled] = useState<CourseOut[]>([])
   const [categories, setCategories] = useState<CategoryOut[]>([])
   const [activeCat, setActiveCat] = useState<string>('')
   const [loading, setLoading] = useState(true)
@@ -251,12 +257,11 @@ function BrowseCoursesSection({ token }: { token: string }) {
   const load = async () => {
     setLoading(true)
     try {
-      const [all, myEnrolled, summaries] = await Promise.all([
+      const [all, summaries] = await Promise.all([
         listPublishedCourses(activeCat || undefined),
-        getEnrolledCourses(token),
         getCourseFeedbackSummaries(),
       ])
-      setCourses(all); setEnrolled(myEnrolled); setFeedbackSummaries(summaries)
+      setCourses(all); setFeedbackSummaries(summaries)
     } finally { setLoading(false) }
   }
 
@@ -285,7 +290,7 @@ function BrowseCoursesSection({ token }: { token: string }) {
         return
       }
       await enrollInCourse(token, courseId)
-      await load()
+      await Promise.all([load(), refreshEnrolled()])
     } catch (e: any) { setErr(e.message) } finally { setEnrollingId(null) }
   }
 
@@ -767,10 +772,21 @@ function BrowseCoursesSection({ token }: { token: string }) {
 }
 
 /* ── My Courses Section (enrolled) ── */
-function MyCoursesSection({ token, onNavigate }: { token: string; onNavigate: (id: string) => void }) {
+function MyCoursesSection({
+  token,
+  onNavigate,
+  enrolled,
+  enrolledLoading,
+  refreshEnrolled,
+}: {
+  token: string
+  onNavigate: (id: string) => void
+  enrolled: CourseOut[]
+  enrolledLoading: boolean
+  refreshEnrolled: () => Promise<void>
+}) {
   const navigate = useNavigate()
-  const [enrolled, setEnrolled] = useState<CourseOut[]>([])
-  const [loading, setLoading] = useState(true)
+  const loading = enrolledLoading
   const [selected, setSelected] = useState<CourseOut | null>(null)
   const [confirmUnenroll, setConfirmUnenroll] = useState<string | null>(null)
   const [unenrolling, setUnenrolling] = useState(false)
@@ -780,20 +796,20 @@ function MyCoursesSection({ token, onNavigate }: { token: string; onNavigate: (i
   const [filter, setFilter] = useState<'all' | 'in_progress' | 'completed' | 'not_started'>('all')
   const [search, setSearch] = useState('')
 
+  // Default-expand the first section of the first course once enrolled data arrives
   useEffect(() => {
-    setLoading(true)
-    getEnrolledCourses(token).then(c => {
-      setEnrolled(c)
-      if (c.length > 0 && c[0].sections.length > 0) setExpandedSection(c[0].sections[0].id)
-    }).finally(() => setLoading(false))
-  }, [token])
+    if (expandedSection) return
+    if (enrolled.length > 0 && enrolled[0].sections.length > 0) {
+      setExpandedSection(enrolled[0].sections[0].id)
+    }
+  }, [enrolled, expandedSection])
 
   const handleUnenroll = async (courseId: string) => {
     setUnenrolling(true)
     setUnenrollErr('')
     try {
       await unenrollFromCourse(token, courseId)
-      setEnrolled(prev => prev.filter(c => c.id !== courseId))
+      await refreshEnrolled()
       setConfirmUnenroll(null)
       if (selected?.id === courseId) setSelected(null)
     } catch (e: any) {
@@ -1987,6 +2003,7 @@ export default function StudentDashboard() {
   const [nav, setNav] = useState('home')
   const [mounted, setMounted] = useState<Set<string>>(() => new Set(['home']))
   const [enrolledCourses, setEnrolledCourses] = useState<CourseOut[]>([])
+  const [enrolledLoading, setEnrolledLoading] = useState(true)
   const firstName = user?.full_name?.split(' ')[0] || ''
 
   useEffect(() => {
@@ -1998,11 +2015,19 @@ export default function StudentDashboard() {
     })
   }, [nav])
 
-  useEffect(() => {
-    if (token) {
-      getEnrolledCourses(token).then(setEnrolledCourses).catch(() => {})
-    }
+  const refreshEnrolled = useCallback(async () => {
+    if (!token) return
+    try {
+      const c = await getEnrolledCourses(token)
+      setEnrolledCourses(c)
+    } catch { /* swallow — surfaced via individual section UIs */ }
   }, [token])
+
+  useEffect(() => {
+    if (!token) return
+    setEnrolledLoading(true)
+    refreshEnrolled().finally(() => setEnrolledLoading(false))
+  }, [token, refreshEnrolled])
 
   const resumeCourse = enrolledCourses.reduce<CourseOut | null>(
     (best, c) => {
@@ -2024,12 +2049,26 @@ export default function StudentDashboard() {
 
       {/* ── Courses ── */}
       <div className={nav !== 'courses' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
-        {mounted.has('courses') && <BrowseCoursesSection token={token!} />}
+        {mounted.has('courses') && (
+          <BrowseCoursesSection
+            token={token!}
+            enrolled={enrolledCourses}
+            refreshEnrolled={refreshEnrolled}
+          />
+        )}
       </div>
 
       {/* ── My Courses ── */}
       <div className={nav !== 'my-courses' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>
-        {mounted.has('my-courses') && <MyCoursesSection token={token!} onNavigate={setNav} />}
+        {mounted.has('my-courses') && (
+          <MyCoursesSection
+            token={token!}
+            onNavigate={setNav}
+            enrolled={enrolledCourses}
+            enrolledLoading={enrolledLoading}
+            refreshEnrolled={refreshEnrolled}
+          />
+        )}
       </div>
 
       {/* ── Messages ── */}

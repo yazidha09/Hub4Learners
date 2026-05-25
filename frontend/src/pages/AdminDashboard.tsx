@@ -8,11 +8,10 @@ import {
   type AdminUser, type PlatformStats, type AnnouncementOut, ROLE_LABELS, ALL_ROLES,
 } from '../api/admin'
 import {
-  listRegions, createRegion, deleteRegion,
   listUniversities, createUniversity, deleteUniversity,
-  createUniversityAdmin, createProfessor,
+  createUniversityAdmin, createProfessor, assignUserUniversity,
   listJoinRequests, reviewJoinRequest,
-  type RegionOut, type UniversityOut, type JoinRequestOut,
+  type UniversityOut, type JoinRequestOut,
 } from '../api/org'
 import { listCategories, createCategory, updateCategory, deleteCategory, type CategoryOut } from '../api/category'
 import type { CourseOut } from '../api/course'
@@ -80,11 +79,10 @@ const ROLE_COLORS: Record<string, string> = {
    OVERVIEW PANEL
    ════════════════════════════════════════════════════════════════════════════ */
 
-function OverviewPanel({ token, userRole, universityName, regionName, onNav }: {
+function OverviewPanel({ token, userRole, universityName, onNav }: {
   token: string
   userRole: string
   universityName: string | null
-  regionName: string | null
   onNav: (id: string) => void
 }) {
   const isSuperAdmin = userRole === 'super_admin'
@@ -98,7 +96,7 @@ function OverviewPanel({ token, userRole, universityName, regionName, onNav }: {
 
   // ── Scoped overview for university admin ──────────────────────────────────
   if (!isSuperAdmin) {
-    const scopeLabel = `University: ${universityName ?? 'Your University'}${regionName ? ` · ${regionName}` : ''}`
+    const scopeLabel = `University: ${universityName ?? 'Your University'}`
     const quickActions = [{ label: 'Create Professors', nav: 'org' }, { label: 'Manage Users', nav: 'users' }]
 
     return (
@@ -877,32 +875,29 @@ function CategoriesPanel({ token }: { token: string }) {
    ════════════════════════════════════════════════════════════════════════════ */
 
 function OrgPanel({ token, userRole }: { token: string; userRole: string }) {
-  // super_admin → regions, university_admin → professors
-  const [tab, setTab] = useState<'regions' | 'universities' | 'admins' | 'professors' | 'join-requests'>(
-    userRole === 'super_admin' ? 'regions' : 'professors'
+  // super_admin → universities, university_admin → professors
+  const [tab, setTab] = useState<'universities' | 'admins' | 'manage-admins' | 'professors' | 'join-requests'>(
+    userRole === 'super_admin' ? 'universities' : 'professors'
   )
-  const [regions, setRegions] = useState<RegionOut[]>([])
   const [universities, setUniversities] = useState<UniversityOut[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
 
-  // Region form
-  const [showRegionForm, setShowRegionForm] = useState(false)
-  const [regionName, setRegionName] = useState('')
-  const [regionCode, setRegionCode] = useState('')
-  const [savingRegion, setSavingRegion] = useState(false)
-
   // University form
   const [showUniForm, setShowUniForm] = useState(false)
   const [uniName, setUniName] = useState('')
-  const [uniRegionId, setUniRegionId] = useState('')
   const [savingUni, setSavingUni] = useState(false)
 
   // Admin creation form (super_admin only — university admins)
   const [adminForm, setAdminForm] = useState({ full_name: '', email: '', password: '', university_id: '' })
   const [savingAdmin, setSavingAdmin] = useState(false)
   const [adminSuccess, setAdminSuccess] = useState('')
+
+  // Existing university admins (super_admin reassignment)
+  const [uniAdmins, setUniAdmins] = useState<AdminUser[]>([])
+  const [reassigning, setReassigning] = useState<string | null>(null)
+  const [reassignSuccess, setReassignSuccess] = useState('')
 
   // Professor creation form (university_admin)
   const [profForm, setProfForm] = useState({ full_name: '', email: '', password: '' })
@@ -916,13 +911,16 @@ function OrgPanel({ token, userRole }: { token: string; userRole: string }) {
   const isSuperAdmin = userRole === 'super_admin'
   const isUniversityAdmin = userRole === 'university_admin'
 
+  const loadUniAdmins = () => {
+    listUsers(token, 'university_admin').then(setUniAdmins).catch(() => {})
+  }
+
   useEffect(() => {
     setLoading(true)
-    const loads: Promise<any>[] = [
-      listRegions(token).then(setRegions).catch(() => {}),
-    ]
+    const loads: Promise<any>[] = []
     if (isSuperAdmin) {
       loads.push(listUniversities(token).then(setUniversities).catch(() => {}))
+      loads.push(listUsers(token, 'university_admin').then(setUniAdmins).catch(() => {}))
     }
     if (isUniversityAdmin) {
       loads.push(listJoinRequests(token).then(setJoinRequests).catch(() => {}))
@@ -930,35 +928,14 @@ function OrgPanel({ token, userRole }: { token: string; userRole: string }) {
     Promise.all(loads).finally(() => setLoading(false))
   }, [token])
 
-  const handleCreateRegion = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!regionName.trim()) return
-    setSavingRegion(true); setErr('')
-    try {
-      const r = await createRegion(token, { name: regionName.trim(), code: regionCode.trim() || undefined })
-      setRegions(prev => [...prev, r])
-      setRegionName(''); setRegionCode(''); setShowRegionForm(false)
-    } catch (e: any) { setErr(e.message) }
-    finally { setSavingRegion(false) }
-  }
-
-  const handleDeleteRegion = async (id: string) => {
-    setErr('')
-    try {
-      await deleteRegion(token, id)
-      setRegions(prev => prev.filter(r => r.id !== id))
-      setConfirmDelete(null)
-    } catch (e: any) { setErr(e.message) }
-  }
-
   const handleCreateUni = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!uniName.trim() || !uniRegionId) return
+    if (!uniName.trim()) return
     setSavingUni(true); setErr('')
     try {
-      const u = await createUniversity(token, { name: uniName.trim(), region_id: uniRegionId })
+      const u = await createUniversity(token, { name: uniName.trim() })
       setUniversities(prev => [...prev, u])
-      setUniName(''); setUniRegionId(''); setShowUniForm(false)
+      setUniName(''); setShowUniForm(false)
     } catch (e: any) { setErr(e.message) }
     finally { setSavingUni(false) }
   }
@@ -979,8 +956,20 @@ function OrgPanel({ token, userRole }: { token: string; userRole: string }) {
       await createUniversityAdmin(token, { ...adminForm, university_id: adminForm.university_id })
       setAdminSuccess('University admin created successfully')
       setAdminForm({ full_name: '', email: '', password: '', university_id: '' })
+      loadUniAdmins()
     } catch (e: any) { setErr(e.message) }
     finally { setSavingAdmin(false) }
+  }
+
+  const handleReassignAdmin = async (userId: string, universityId: string) => {
+    if (!universityId) return
+    setReassigning(userId); setErr(''); setReassignSuccess('')
+    try {
+      const updated = await assignUserUniversity(token, userId, universityId)
+      setUniAdmins(prev => prev.map(u => u.id === userId ? { ...u, university_id: updated.university_id } : u))
+      setReassignSuccess('University updated')
+    } catch (e: any) { setErr(e.message) }
+    finally { setReassigning(null) }
   }
 
   const handleCreateProfessor = async (e: React.FormEvent) => {
@@ -1005,10 +994,10 @@ function OrgPanel({ token, userRole }: { token: string; userRole: string }) {
   }
 
   const tabs = [
-    { id: 'regions' as const,      label: 'Regions',          show: isSuperAdmin },
-    { id: 'universities' as const, label: 'Universities',     show: isSuperAdmin },
-    { id: 'admins' as const,       label: 'Create Admins',    show: isSuperAdmin },
-    { id: 'professors' as const,   label: 'Create Professor', show: isUniversityAdmin },
+    { id: 'universities' as const,  label: 'Universities',     show: isSuperAdmin },
+    { id: 'admins' as const,        label: 'Create Admins',    show: isSuperAdmin },
+    { id: 'manage-admins' as const, label: 'Manage Admins',    show: isSuperAdmin },
+    { id: 'professors' as const,    label: 'Create Professor', show: isUniversityAdmin },
     { id: 'join-requests' as const, label: `Join Requests${joinRequests.length ? ` (${joinRequests.length})` : ''}`, show: isUniversityAdmin },
   ].filter(t => t.show)
 
@@ -1016,7 +1005,7 @@ function OrgPanel({ token, userRole }: { token: string; userRole: string }) {
     <div className="max-w-[860px] animate-fadeIn">
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Organization</h2>
-        <p className="text-sm text-slate-500 mt-1">Manage regions, universities, and admin accounts</p>
+        <p className="text-sm text-slate-500 mt-1">Manage universities and admin accounts</p>
       </div>
 
       {/* Tabs */}
@@ -1041,77 +1030,6 @@ function OrgPanel({ token, userRole }: { token: string; userRole: string }) {
         </div>
       )}
 
-      {/* ── Regions Tab ── */}
-      {tab === 'regions' && (
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-sm text-slate-500">{regions.length} region{regions.length !== 1 ? 's' : ''}</p>
-            {!showRegionForm && (
-              <button onClick={() => setShowRegionForm(true)}
-                className="h-9 px-4 rounded-xl bg-slate-900 text-white text-sm font-semibold border-none cursor-pointer hover:bg-slate-800 transition-colors flex items-center gap-2">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-                New region
-              </button>
-            )}
-          </div>
-
-          {showRegionForm && (
-            <form onSubmit={handleCreateRegion} className="bg-white rounded-2xl border border-slate-200 p-5 mb-5 space-y-3">
-              <h3 className="text-sm font-semibold text-slate-900">New region</h3>
-              <input value={regionName} onChange={e => setRegionName(e.target.value)} placeholder="Region name *"
-                className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100" />
-              <input value={regionCode} onChange={e => setRegionCode(e.target.value)} placeholder="Region code (optional, e.g. NE)"
-                className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100" />
-              <div className="flex gap-2 pt-1">
-                <button type="button" onClick={() => { setShowRegionForm(false); setRegionName(''); setRegionCode('') }}
-                  className="flex-1 h-9 rounded-lg text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 border-none cursor-pointer">Cancel</button>
-                <button type="submit" disabled={!regionName.trim() || savingRegion}
-                  className="flex-1 h-9 rounded-lg text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed border-none cursor-pointer">
-                  {savingRegion ? 'Creating...' : 'Create'}
-                </button>
-              </div>
-            </form>
-          )}
-
-          {loading ? (
-            <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-14 rounded-xl skeleton" />)}</div>
-          ) : regions.length === 0 ? (
-            <div className="text-center py-14 bg-white rounded-2xl border border-dashed border-slate-200">
-              <p className="text-sm font-semibold text-slate-900">No regions yet</p>
-              <p className="text-xs text-slate-400 mt-1">Create your first region above</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {regions.map(r => (
-                <div key={r.id} className="bg-white rounded-xl border border-slate-200 px-5 py-4 flex items-center gap-4 hover:shadow-sm transition-all">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-slate-900">{r.name}</p>
-                    <p className="text-xs text-slate-400">{r.code ? `Code: ${r.code} · ` : ''}{r.university_count} universit{r.university_count !== 1 ? 'ies' : 'y'}</p>
-                  </div>
-                  {confirmDelete === r.id ? (
-                    <div className="flex items-center gap-1">
-                      <button onClick={() => handleDeleteRegion(r.id)}
-                        className="w-7 h-7 rounded-lg bg-red-500 text-white flex items-center justify-center border-none cursor-pointer hover:bg-red-600">
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
-                      </button>
-                      <button onClick={() => setConfirmDelete(null)}
-                        className="w-7 h-7 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center border-none cursor-pointer hover:bg-slate-200">
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                      </button>
-                    </div>
-                  ) : (
-                    <button onClick={() => setConfirmDelete(r.id)}
-                      className="w-7 h-7 rounded-lg bg-white border border-slate-200 text-slate-400 flex items-center justify-center cursor-pointer hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-all">
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* ── Universities Tab ── */}
       {tab === 'universities' && (
         <div>
@@ -1131,15 +1049,10 @@ function OrgPanel({ token, userRole }: { token: string; userRole: string }) {
               <h3 className="text-sm font-semibold text-slate-900">New university</h3>
               <input value={uniName} onChange={e => setUniName(e.target.value)} placeholder="University name *"
                 className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100" />
-              <select value={uniRegionId} onChange={e => setUniRegionId(e.target.value)}
-                className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 bg-white">
-                <option value="">Select region *</option>
-                {regions.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-              </select>
               <div className="flex gap-2 pt-1">
-                <button type="button" onClick={() => { setShowUniForm(false); setUniName(''); setUniRegionId('') }}
+                <button type="button" onClick={() => { setShowUniForm(false); setUniName('') }}
                   className="flex-1 h-9 rounded-lg text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 border-none cursor-pointer">Cancel</button>
-                <button type="submit" disabled={!uniName.trim() || !uniRegionId || savingUni}
+                <button type="submit" disabled={!uniName.trim() || savingUni}
                   className="flex-1 h-9 rounded-lg text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed border-none cursor-pointer">
                   {savingUni ? 'Creating...' : 'Create'}
                 </button>
@@ -1159,7 +1072,6 @@ function OrgPanel({ token, userRole }: { token: string; userRole: string }) {
                 <div key={u.id} className="bg-white rounded-xl border border-slate-200 px-5 py-4 flex items-center gap-4 hover:shadow-sm transition-all">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-slate-900">{u.name}</p>
-                    <p className="text-xs text-slate-400">Region: {u.region_name ?? u.region_id}</p>
                   </div>
                   {confirmDelete === u.id ? (
                     <div className="flex items-center gap-1">
@@ -1285,7 +1197,7 @@ function OrgPanel({ token, userRole }: { token: string; userRole: string }) {
               <select value={adminForm.university_id} onChange={e => setAdminForm(p => ({ ...p, university_id: e.target.value }))}
                 className="w-full h-10 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 bg-white">
                 <option value="">Assign to university *</option>
-                {universities.map(u => <option key={u.id} value={u.id}>{u.name} ({u.region_name})</option>)}
+                {universities.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
             </div>
 
@@ -1294,6 +1206,59 @@ function OrgPanel({ token, userRole }: { token: string; userRole: string }) {
               {savingAdmin ? 'Creating...' : 'Create admin account'}
             </button>
           </form>
+        </div>
+      )}
+
+      {/* ── Manage Admins Tab (super_admin) ── */}
+      {tab === 'manage-admins' && (
+        <div>
+          {reassignSuccess && (
+            <div className="flex items-center gap-3 p-4 mb-4 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-700">
+              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+              {reassignSuccess}
+            </div>
+          )}
+          <p className="text-sm text-slate-500 mb-4">
+            Reassign existing university admins to a different university. Useful when an admin's university was deleted or they need to be moved.
+          </p>
+          {loading ? (
+            <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-16 rounded-xl skeleton" />)}</div>
+          ) : uniAdmins.length === 0 ? (
+            <div className="text-center py-14 bg-white rounded-2xl border border-dashed border-slate-200">
+              <p className="text-sm font-semibold text-slate-900">No university admins yet</p>
+              <p className="text-xs text-slate-400 mt-1">Create one from the "Create Admins" tab.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {uniAdmins.map(u => {
+                const currentUni = universities.find(uni => uni.id === u.university_id)
+                return (
+                  <div key={u.id} className="bg-white rounded-xl border border-slate-200 px-5 py-4 flex items-center gap-4 hover:shadow-sm transition-all">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-slate-900 truncate">{u.full_name}</p>
+                      <p className="text-xs text-slate-400 truncate">{u.email}</p>
+                      <p className="text-[11px] mt-0.5">
+                        {currentUni
+                          ? <span className="text-slate-500">Currently at <span className="font-semibold text-slate-700">{currentUni.name}</span></span>
+                          : <span className="text-amber-600 font-semibold">Not assigned</span>}
+                      </p>
+                    </div>
+                    <select
+                      value={u.university_id ?? ''}
+                      onChange={e => handleReassignAdmin(u.id, e.target.value)}
+                      disabled={reassigning === u.id}
+                      className="h-9 px-3 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400 bg-white shrink-0 cursor-pointer disabled:opacity-50"
+                    >
+                      <option value="" disabled>Assign to university…</option>
+                      {universities.map(uni => (
+                        <option key={uni.id} value={uni.id}>{uni.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1452,7 +1417,6 @@ export default function AdminDashboard() {
           token={token!}
           userRole={role}
           universityName={user?.university_name ?? null}
-          regionName={user?.region_name ?? null}
           onNav={setNav}
         />
       </DashboardLayout>
@@ -1462,7 +1426,7 @@ export default function AdminDashboard() {
   if (activeNav === 'org') {
     const orgSubtitle = role === 'university_admin'
       ? 'Create professor accounts for your university.'
-      : 'Manage regions, universities, and admin accounts.'
+      : 'Manage universities and admin accounts.'
     return wrapper('Organization', orgSubtitle, <OrgPanel token={token!} userRole={role} />)
   }
 

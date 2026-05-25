@@ -240,9 +240,12 @@ export function togglePublish(token: string, courseId: string): Promise<CourseOu
   return request<CourseOut>(`/courses/${courseId}/publish`, token, { method: 'PATCH' })
 }
 
-export function enrollInCourse(token: string, courseId: string): Promise<EnrollmentOut> {
+export async function enrollInCourse(token: string, courseId: string): Promise<EnrollmentOut> {
+  // Invalidate AFTER the mutation lands so a concurrent read can't re-cache
+  // the pre-enrollment list under the freshly cleared key.
+  const res = await request<EnrollmentOut>(`/courses/${courseId}/enroll`, token, { method: 'POST' })
   invalidate('/courses')
-  return request<EnrollmentOut>(`/courses/${courseId}/enroll`, token, { method: 'POST' })
+  return res
 }
 
 export function getEnrolledCourses(token: string): Promise<CourseOut[]> {
@@ -253,14 +256,16 @@ export function getMyStudents(token: string): Promise<CourseStudentsOut[]> {
   return request<CourseStudentsOut[]>('/courses/my/students', token)
 }
 
-export function unenrollFromCourse(token: string, courseId: string): Promise<{ detail: string }> {
+export async function unenrollFromCourse(token: string, courseId: string): Promise<{ detail: string }> {
+  const res = await request<{ detail: string }>(`/courses/${courseId}/enroll`, token, { method: 'DELETE' })
   invalidate('/courses')
-  return request<{ detail: string }>(`/courses/${courseId}/enroll`, token, { method: 'DELETE' })
+  return res
 }
 
-export function deleteCourse(token: string, courseId: string): Promise<{ detail: string }> {
+export async function deleteCourse(token: string, courseId: string): Promise<{ detail: string }> {
+  const res = await request<{ detail: string }>(`/courses/${courseId}`, token, { method: 'DELETE' })
   invalidate('/courses')
-  return request<{ detail: string }>(`/courses/${courseId}`, token, { method: 'DELETE' })
+  return res
 }
 
 export function deleteSection(token: string, courseId: string, sectionId: string): Promise<{ detail: string }> {

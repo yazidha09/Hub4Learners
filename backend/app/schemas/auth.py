@@ -31,9 +31,7 @@ class UserOut(BaseModel):
     speciality: Optional[str] = None
     profile_image: Optional[str] = None
     university_id: Optional[str] = None
-    region_id: Optional[str] = None
     university_name: Optional[str] = None
-    region_name: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -25,10 +25,6 @@ class User(SQLModel, table=True):
         default=None,
         sa_column=Column(ForeignKey("universities.id", ondelete="SET NULL"), nullable=True, index=True),
     )
-    region_id: Optional[UUID] = Field(
-        default=None,
-        sa_column=Column(ForeignKey("regions.id", ondelete="SET NULL"), nullable=True, index=True),
-    )
 
     created_at: datetime = Field(
         sa_column=Column(DateTime, nullable=False, server_default=func.current_timestamp())

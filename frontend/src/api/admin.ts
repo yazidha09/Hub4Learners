@@ -9,7 +9,6 @@ export interface AdminUser {
   role: string
   is_active: boolean
   university_id: string | null
-  region_id: string | null
   created_at: string
 }
 

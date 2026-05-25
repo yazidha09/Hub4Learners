@@ -5,37 +5,15 @@ from uuid import UUID
 from pydantic import BaseModel
 
 
-# ── Region ─────────────────────────────────────────────────────────────────────
-
-class RegionCreate(BaseModel):
-    name: str
-    code: Optional[str] = None
-
-
-class RegionOut(BaseModel):
-    id: str
-    name: str
-    code: Optional[str] = None
-    created_by: Optional[str] = None
-    created_at: datetime
-    university_count: int = 0
-
-    class Config:
-        from_attributes = True
-
-
 # ── University ─────────────────────────────────────────────────────────────────
 
 class UniversityCreate(BaseModel):
     name: str
-    region_id: str
 
 
 class UniversityOut(BaseModel):
     id: str
     name: str
-    region_id: str
-    region_name: Optional[str] = None
     created_by: Optional[str] = None
     created_at: datetime
 
@@ -50,6 +28,10 @@ class CreateAdminRequest(BaseModel):
     email: str
     password: str
     university_id: Optional[str] = None   # required for university_admin
+
+
+class AssignUserUniversity(BaseModel):
+    university_id: Optional[str] = None   # None to unassign
 
 
 # ── University join requests ───────────────────────────────────────────────────

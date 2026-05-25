@@ -1,19 +1,8 @@
 const API_BASE = 'http://localhost:8000/api'
 
-export interface RegionOut {
-  id: string
-  name: string
-  code: string | null
-  created_by: string | null
-  created_at: string
-  university_count: number
-}
-
 export interface UniversityOut {
   id: string
   name: string
-  region_id: string
-  region_name: string | null
   created_by: string | null
   created_at: string
 }
@@ -22,7 +11,6 @@ export interface CreateAdminRequest {
   full_name: string
   email: string
   password: string
-  region_id?: string
   university_id?: string
 }
 
@@ -42,28 +30,13 @@ async function request<T>(path: string, token: string, options?: RequestInit): P
   return res.json() as Promise<T>
 }
 
-// ── Regions ──────────────────────────────────────────────────────────────────
-
-export function listRegions(token: string): Promise<RegionOut[]> {
-  return request<RegionOut[]>('/org/regions', token)
-}
-
-export function createRegion(token: string, data: { name: string; code?: string }): Promise<RegionOut> {
-  return request<RegionOut>('/org/regions', token, { method: 'POST', body: JSON.stringify(data) })
-}
-
-export function deleteRegion(token: string, regionId: string): Promise<{ detail: string }> {
-  return request<{ detail: string }>(`/org/regions/${regionId}`, token, { method: 'DELETE' })
-}
-
 // ── Universities ──────────────────────────────────────────────────────────────
 
-export function listUniversities(token: string, regionId?: string): Promise<UniversityOut[]> {
-  const qs = regionId ? `?region_id=${regionId}` : ''
-  return request<UniversityOut[]>(`/org/universities${qs}`, token)
+export function listUniversities(token: string): Promise<UniversityOut[]> {
+  return request<UniversityOut[]>('/org/universities', token)
 }
 
-export function createUniversity(token: string, data: { name: string; region_id: string }): Promise<UniversityOut> {
+export function createUniversity(token: string, data: { name: string }): Promise<UniversityOut> {
   return request<UniversityOut>('/org/universities', token, { method: 'POST', body: JSON.stringify(data) })
 }
 
@@ -87,6 +60,19 @@ export function createProfessor(token: string, data: CreateAdminRequest): Promis
 
 export function assignProfessor(token: string, universityId: string, professorId: string): Promise<{ id: string; full_name: string; university_id: string }> {
   return request(`/org/universities/${universityId}/professors/${professorId}`, token, { method: 'POST' })
+}
+
+// ── User-to-university reassignment (super_admin) ─────────────────────────────
+
+export function assignUserUniversity(
+  token: string,
+  userId: string,
+  universityId: string | null,
+): Promise<{ id: string; full_name: string; email: string; role: string; university_id: string | null }> {
+  return request(`/org/users/${userId}/university`, token, {
+    method: 'PUT',
+    body: JSON.stringify({ university_id: universityId }),
+  })
 }
 
 // ── University join requests ──────────────────────────────────────────────────

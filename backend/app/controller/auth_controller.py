@@ -3,24 +3,16 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.user import User
-from app.models.region import Region
 from app.models.university import University
 from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse, UserOut, UpdateProfileRequest
 from app.utils.security import hash_password, verify_password, create_access_token
 
 
 def _build_user_out(user: User, db: Session) -> UserOut:
-    # Single round-trip for the two label lookups instead of two sequential
-    # SELECTs. Both tables are tiny so the IN-list overhead is negligible.
     university_name = None
-    region_name = None
-    if user.university_id or user.region_id:
-        if user.university_id:
-            uni = db.query(University.name).filter(University.id == user.university_id).first()
-            university_name = uni[0] if uni else None
-        if user.region_id:
-            region = db.query(Region.name).filter(Region.id == user.region_id).first()
-            region_name = region[0] if region else None
+    if user.university_id:
+        uni = db.query(University.name).filter(University.id == user.university_id).first()
+        university_name = uni[0] if uni else None
     return UserOut(
         id=str(user.id),
         full_name=user.full_name,
@@ -31,9 +23,7 @@ def _build_user_out(user: User, db: Session) -> UserOut:
         speciality=user.speciality,
         profile_image=user.profile_image,
         university_id=str(user.university_id) if user.university_id else None,
-        region_id=str(user.region_id) if user.region_id else None,
         university_name=university_name,
-        region_name=region_name,
     )
 
 
@@ -43,7 +33,6 @@ def _build_token(user: User) -> str:
         "role":          user.role,
         "is_verified":   user.is_verified,
         "university_id": str(user.university_id) if user.university_id else None,
-        "region_id":     str(user.region_id)     if user.region_id     else None,
     })
 
 
@@ -133,14 +122,12 @@ def update_user_profile(user_id: str, data: UpdateProfileRequest, db: Session) -
             )
         if data.university_id == "" or data.university_id.lower() == "null":
             user.university_id = None
-            user.region_id = None
         else:
             from uuid import UUID as _UUID
             uni = db.query(University).filter(University.id == _UUID(data.university_id)).first()
             if not uni:
                 raise HTTPException(status_code=404, detail="University not found")
             user.university_id = uni.id
-            user.region_id = uni.region_id
 
     db.commit()
     db.refresh(user)
