@@ -1,4 +1,4 @@
-import { cachedGet, invalidate } from './_client'
+import { cachedGet, rawRequest, invalidate } from './_client'
 
 const API_BASE = 'http://localhost:8000/api'
 
@@ -249,7 +249,7 @@ export async function enrollInCourse(token: string, courseId: string): Promise<E
 }
 
 export function getEnrolledCourses(token: string): Promise<CourseOut[]> {
-  return cachedGet<CourseOut[]>('/courses/enrolled', token, 10_000)
+  return rawRequest<CourseOut[]>('/courses/enrolled', token)
 }
 
 export function getMyStudents(token: string): Promise<CourseStudentsOut[]> {

@@ -43,12 +43,26 @@ async def confirm_payment(
     course = db.query(Course).filter(Course.id == enrollment.course_id).first()
     student = db.query(User).filter(User.id == UUID(current_user["sub"])).first()
     if course and student:
-        await notification_controller.push(
-            user_id=str(course.professor_id),
-            type="enrollment",
-            title="New Paid Enrollment",
-            body=f"{student.full_name} purchased your course \"{course.title}\"",
-            db=db,
-            meta={"course_id": str(course.id), "student_id": current_user["sub"]},
-        )
+        try:
+            await notification_controller.push(
+                user_id=str(course.professor_id),
+                type="enrollment",
+                title="New Paid Enrollment",
+                body=f"{student.full_name} purchased your course \"{course.title}\"",
+                db=db,
+                meta={"course_id": str(course.id), "student_id": current_user["sub"]},
+            )
+        except Exception:
+            pass
+        try:
+            await notification_controller.push(
+                user_id=current_user["sub"],
+                type="enrollment_confirmed",
+                title="Enrollment Successful",
+                body=f"You purchased \"{course.title}\"",
+                db=db,
+                meta={"course_id": str(course.id)},
+            )
+        except Exception:
+            pass
     return enrollment

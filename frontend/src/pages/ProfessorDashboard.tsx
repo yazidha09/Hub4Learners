@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useGamification } from '../context/GamificationContext'
 import DashboardLayout, { type NavItem } from '../components/DashboardLayout'
+import type { AppNotification } from '../hooks/useNotifications'
 import {
   getMyCourses, getCourseDetail, createCourse, addSection, addSubsection, togglePublish, listPublishedCourses,
   getMyStudents, getEnrolledCourses, enrollInCourse, unenrollFromCourse, deleteCourse, deleteSection,
@@ -1687,8 +1688,13 @@ function BrowseCoursesSection({
   const [expandedMaterial, setExpandedMaterial] = useState<string | null>(null)
   const [enrollingId, setEnrollingId] = useState<string | null>(null)
   const [err, setErr] = useState('')
+  const [justEnrolled, setJustEnrolled] = useState<Set<string>>(new Set())
 
-  const enrolledIds = useMemo(() => new Set(enrolled.map(c => c.id)), [enrolled])
+  const enrolledIds = useMemo(() => {
+    const ids = new Set(enrolled.map(c => c.id))
+    for (const id of justEnrolled) ids.add(id)
+    return ids
+  }, [enrolled, justEnrolled])
 
   useEffect(() => {
     listCategories().then(setCategories).catch(() => {})
@@ -1700,7 +1706,10 @@ function BrowseCoursesSection({
   }, [activeCat])
 
   const handleEnroll = async (courseId: string) => {
-    setEnrollingId(courseId); setErr('')
+    setErr('')
+    // Optimistic — badge shows immediately
+    setJustEnrolled(prev => { const next = new Set(prev); next.add(courseId); return next })
+    setEnrollingId(courseId)
     const course = courses.find(c => c.id === courseId)
     try {
       if (course && !course.is_free) {
@@ -1710,8 +1719,10 @@ function BrowseCoursesSection({
       }
       await enrollInCourse(token, courseId)
       await refreshEnrolled()
+      setJustEnrolled(new Set())
     } catch (e: any) {
       setErr(e.message || 'Could not enroll')
+      setJustEnrolled(prev => { const next = new Set(prev); next.delete(courseId); return next })
     } finally {
       setEnrollingId(null)
     }
@@ -3980,6 +3991,12 @@ export default function ProfessorDashboard() {
     refreshEnrolled().finally(() => setEnrolledLoading(false))
   }, [token, refreshEnrolled])
 
+  const handleEnrollmentConfirmed = useCallback((notif: AppNotification) => {
+    if (notif.type === 'enrollment_confirmed') {
+      refreshEnrolled()
+    }
+  }, [refreshEnrolled])
+
   const navItems = user?.university_id
     ? [...BASE_NAV.slice(0, -1), ANNOUNCEMENTS_NAV_ITEM, BASE_NAV[BASE_NAV.length - 1]]
     : BASE_NAV
@@ -3987,7 +4004,7 @@ export default function ProfessorDashboard() {
   const knownNavIds = new Set(['home', 'courses', 'my-learning', 'my-courses', 'gamification', 'students', 'messages', 'find-friends', 'announcements', 'analytics'])
 
   return (
-    <DashboardLayout navItems={navItems} activeNav={nav} onNavChange={setNav} roleLabel="Professor">
+    <DashboardLayout navItems={navItems} activeNav={nav} onNavChange={setNav} roleLabel="Professor" onNotification={handleEnrollmentConfirmed}>
 
       {/* ── Browse Courses ── */}
       <div className={nav !== 'courses' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>

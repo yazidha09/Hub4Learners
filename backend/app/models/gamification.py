@@ -72,7 +72,7 @@ class XPLog(SQLModel, table=True):
     source_type: str = Field(sa_column=Column(String(40), nullable=False, index=True))
     # source_id ties an award to a specific lesson/quiz/etc. so duplicate awards
     # for the *same* artifact can be detected. Free-form because sources differ.
-    source_id: Optional[str] = Field(default=None, sa_column=Column(String(64), nullable=True, index=True))
+    source_id: Optional[str] = Field(default=None, sa_column=Column(String(128), nullable=True, index=True))
     description: Optional[str] = Field(default=None, sa_column=Column(String(255), nullable=True))
     created_at: datetime = Field(
         sa_column=Column(DateTime, nullable=False, server_default=func.current_timestamp(), index=True)

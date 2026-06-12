@@ -3,6 +3,7 @@ import Markdown from 'react-markdown'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import DashboardLayout, { type NavItem } from '../components/DashboardLayout'
+import type { AppNotification } from '../hooks/useNotifications'
 import {
   listPublishedCourses, getCourseDetail, getEnrolledCourses, enrollInCourse, unenrollFromCourse,
   getCourseFeedback, getCourseFeedbackSummaries, getStudentAnalytics,
@@ -243,6 +244,7 @@ function BrowseCoursesSection({
   const [feedbackSummaries, setFeedbackSummaries] = useState<Record<string, { avg_rating: number; count: number }>>({})
   const [search, setSearch] = useState('')
   const [expandedMaterial, setExpandedMaterial] = useState<string | null>(null)
+  const [justEnrolled, setJustEnrolled] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     listCategories().then(setCategories).catch(() => {})
@@ -267,10 +269,13 @@ function BrowseCoursesSection({
 
   useEffect(() => { load() }, [token, activeCat])
 
-  // Memoize derived data so unrelated state updates (typing in unrelated
-  // forms, opening modals, etc.) don't re-allocate a Set and re-scan the
-  // courses array each render.
-  const enrolledIds = useMemo(() => new Set(enrolled.map(c => c.id)), [enrolled])
+  // Optimistically enrolled IDs — ensures the "Enrolled" badge shows
+  // immediately when the user clicks, before the API refresh completes.
+  const enrolledIds = useMemo(() => {
+    const ids = new Set(enrolled.map(c => c.id))
+    for (const id of justEnrolled) ids.add(id)
+    return ids
+  }, [enrolled, justEnrolled])
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return courses
@@ -281,7 +286,10 @@ function BrowseCoursesSection({
   }, [courses, search])
 
   const handleEnroll = async (courseId: string) => {
-    setErr(''); setEnrollingId(courseId)
+    setErr('')
+    // Optimistic — badge shows immediately
+    setJustEnrolled(prev => { const next = new Set(prev); next.add(courseId); return next })
+    setEnrollingId(courseId)
     const course = courses.find(c => c.id === courseId)
     try {
       if (course && !course.is_free) {
@@ -290,8 +298,15 @@ function BrowseCoursesSection({
         return
       }
       await enrollInCourse(token, courseId)
-      await Promise.all([load(), refreshEnrolled()])
-    } catch (e: any) { setErr(e.message) } finally { setEnrollingId(null) }
+      await refreshEnrolled()
+      load().catch(() => {})
+      setJustEnrolled(new Set())
+    } catch (e: any) {
+      setErr(e.message)
+      setJustEnrolled(prev => { const next = new Set(prev); next.delete(courseId); return next })
+    } finally {
+      setEnrollingId(null)
+    }
   }
 
   const typeIcon: Record<string, string> = { pdf: '📄', video: '🎬', audio: '🎵', exercise: '✏️' }
@@ -2029,6 +2044,12 @@ export default function StudentDashboard() {
     refreshEnrolled().finally(() => setEnrolledLoading(false))
   }, [token, refreshEnrolled])
 
+  const handleEnrollmentConfirmed = useCallback((notif: AppNotification) => {
+    if (notif.type === 'enrollment_confirmed') {
+      refreshEnrolled()
+    }
+  }, [refreshEnrolled])
+
   const resumeCourse = enrolledCourses.reduce<CourseOut | null>(
     (best, c) => {
       const pct = c.progress_pct ?? 0
@@ -2045,7 +2066,7 @@ export default function StudentDashboard() {
   const knownNavIds = new Set(['home', 'courses', 'my-courses', 'gamification', 'messages', 'find-friends', 'announcements', 'grades'])
 
   return (
-    <DashboardLayout navItems={navItems} activeNav={nav} onNavChange={setNav} roleLabel="Student">
+    <DashboardLayout navItems={navItems} activeNav={nav} onNavChange={setNav} roleLabel="Student" onNotification={handleEnrollmentConfirmed}>
 
       {/* ── Courses ── */}
       <div className={nav !== 'courses' ? 'hidden' : 'max-w-[960px] mx-auto px-6 md:px-10 py-8'}>

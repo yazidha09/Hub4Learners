@@ -38,6 +38,11 @@ const NOTIF_ICONS: Record<NotificationType | string, React.ReactNode> = {
       <path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" />
     </svg>
   ),
+  enrollment_confirmed: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" /><polyline points="9 11 12 14 16 10" />
+    </svg>
+  ),
   role_changed: (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
@@ -56,6 +61,7 @@ const NOTIF_COLORS: Record<NotificationType | string, string> = {
   friend_request_reviewed: 'bg-emerald-100 text-emerald-600',
   friend_message:          'bg-violet-100 text-violet-600',
   enrollment:              'bg-teal-100 text-teal-600',
+  enrollment_confirmed:    'bg-emerald-100 text-emerald-600',
   role_changed:            'bg-purple-100 text-purple-600',
   announcement:            'bg-orange-100 text-orange-500',
 }
@@ -222,6 +228,7 @@ export default function DashboardLayout({
   onNavChange,
   roleLabel,
   settingsExtra,
+  onNotification,
 }: {
   children: React.ReactNode
   navItems: NavItem[]
@@ -229,6 +236,7 @@ export default function DashboardLayout({
   onNavChange: (id: string) => void
   roleLabel: string
   settingsExtra?: React.ReactNode
+  onNotification?: (notif: AppNotification) => void
 }) {
   const { user, token, logout, refreshUser } = useAuth()
   const { settings, updateSettings } = useSettings()
@@ -242,7 +250,7 @@ export default function DashboardLayout({
   const notifRef = useRef<HTMLDivElement>(null)
   const bellRef = useRef<HTMLButtonElement>(null)
   const [bellRect, setBellRect] = useState<DOMRect | null>(null)
-  const { notifications, unreadCount, markAllRead, markOneRead, dismiss, clearAll } = useNotifications(user?.id, token)
+  const { notifications, unreadCount, markAllRead, markOneRead, dismiss, clearAll } = useNotifications(user?.id, token, onNotification)
 
   // Profile form state
   const [fullName, setFullName] = useState('')

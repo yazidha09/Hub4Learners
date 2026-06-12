@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" version="24.0.0">
+  <diagram name="Global Use Case Diagram">
+    <mxGraphModel dx="0" dy="0" grid="1" gridSize="10" pageWidth="1500" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="act-vis" value="&lt;b&gt;&amp;#171;actor&amp;#187;&lt;br/&gt;Visitor&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#94A3B8;strokeColor=#94A3B8;fontSize=11;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="30" y="30" width="110" height="44" as="geometry"/>
+        </mxCell>
+        <mxCell id="act-stu" value="&lt;b&gt;&amp;#171;actor&amp;#187;&lt;br/&gt;Student&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2563EB;strokeColor=#2563EB;fontSize=11;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="200" y="30" width="110" height="44" as="geometry"/>
+        </mxCell>
+        <mxCell id="act-pro" value="&lt;b&gt;&amp;#171;actor&amp;#187;&lt;br/&gt;Professor&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#059C69;strokeColor=#059C69;fontSize=11;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="430" y="30" width="110" height="44" as="geometry"/>
+        </mxCell>
+        <mxCell id="act-adm" value="&lt;b&gt;&amp;#171;actor&amp;#187;&lt;br/&gt;Univ. Admin&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F97316;strokeColor=#F97316;fontSize=11;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="670" y="30" width="110" height="44" as="geometry"/>
+        </mxCell>
+        <mxCell id="act-sup" value="&lt;b&gt;&amp;#171;actor&amp;#187;&lt;br/&gt;Super Admin&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#7C3AED;strokeColor=#7C3AED;fontSize=11;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="880" y="30" width="110" height="44" as="geometry"/>
+        </mxCell>
+        <mxCell id="v1" value="Browse Catalog" style="ellipse;whiteSpace=wrap;html=1;fillColor=#94A3B8;strokeColor=#94A3B8;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="20" y="130" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-vis" target="v1" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="v2" value="Register" style="ellipse;whiteSpace=wrap;html=1;fillColor=#94A3B8;strokeColor=#94A3B8;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="20" y="180" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-vis" target="v2" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="v3" value="Login" style="ellipse;whiteSpace=wrap;html=1;fillColor=#94A3B8;strokeColor=#94A3B8;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="20" y="230" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-vis" target="v3" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="s1" value="Browse &amp; Enroll in Courses" style="ellipse;whiteSpace=wrap;html=1;fillColor=#2563EB;strokeColor=#2563EB;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="190" y="120" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-stu" target="s1" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="s2" value="Learn (Lessons &amp; QCM)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#2563EB;strokeColor=#2563EB;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="190" y="170" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-stu" target="s2" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="s3" value="Ask AI Tutor" style="ellipse;whiteSpace=wrap;html=1;fillColor=#2563EB;strokeColor=#2563EB;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="190" y="220" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-stu" target="s3" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="s4" value="Participate in Discussions" style="ellipse;whiteSpace=wrap;html=1;fillColor=#2563EB;strokeColor=#2563EB;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="190" y="270" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-stu" target="s4" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="s5" value="Earn XP, Level Up &amp; Badges" style="ellipse;whiteSpace=wrap;html=1;fillColor=#2563EB;strokeColor=#2563EB;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="190" y="320" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-stu" target="s5" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="s6" value="Chat &amp; Friends" style="ellipse;whiteSpace=wrap;html=1;fillColor=#2563EB;strokeColor=#2563EB;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="190" y="370" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-stu" target="s6" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="s7" value="View Profile &amp; Analytics" style="ellipse;whiteSpace=wrap;html=1;fillColor=#2563EB;strokeColor=#2563EB;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="190" y="420" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-stu" target="s7" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1" value="Create &amp; Manage Courses" style="ellipse;whiteSpace=wrap;html=1;fillColor=#059C69;strokeColor=#059C69;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="420" y="120" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-pro" target="p1" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2" value="Build Curriculum (Sections)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#059C69;strokeColor=#059C69;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="420" y="170" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-pro" target="p2" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3" value="AI Generate Course from PDF" style="ellipse;whiteSpace=wrap;html=1;fillColor=#059C69;strokeColor=#059C69;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="420" y="220" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-pro" target="p3" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4" value="Monitor Enrollments &amp; Feedback" style="ellipse;whiteSpace=wrap;html=1;fillColor=#059C69;strokeColor=#059C69;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="420" y="270" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-pro" target="p4" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5" value="Manage Chat Requests" style="ellipse;whiteSpace=wrap;html=1;fillColor=#059C69;strokeColor=#059C69;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="420" y="320" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-pro" target="p5" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6" value="View Analytics &amp; Profile" style="ellipse;whiteSpace=wrap;html=1;fillColor=#059C69;strokeColor=#059C69;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="420" y="370" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e16" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-pro" target="p6" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="a1" value="Review Professor Join Requests" style="ellipse;whiteSpace=wrap;html=1;fillColor=#F97316;strokeColor=#F97316;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="660" y="120" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e17" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-adm" target="a1" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="a2" value="Moderate Discussions &amp; Content" style="ellipse;whiteSpace=wrap;html=1;fillColor=#F97316;strokeColor=#F97316;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="660" y="170" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e18" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-adm" target="a2" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="a3" value="Post University Announcements" style="ellipse;whiteSpace=wrap;html=1;fillColor=#F97316;strokeColor=#F97316;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="660" y="220" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e19" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-adm" target="a3" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="a4" value="View University Statistics" style="ellipse;whiteSpace=wrap;html=1;fillColor=#F97316;strokeColor=#F97316;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="660" y="270" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e20" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-adm" target="a4" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="sa1" value="Manage Regions &amp; Universities" style="ellipse;whiteSpace=wrap;html=1;fillColor=#7C3AED;strokeColor=#7C3AED;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="870" y="120" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e21" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-sup" target="sa1" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="sa2" value="Create Univ. Admin Accounts" style="ellipse;whiteSpace=wrap;html=1;fillColor=#7C3AED;strokeColor=#7C3AED;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="870" y="170" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e22" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-sup" target="sa2" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="sa3" value="Ban / Unban Any User" style="ellipse;whiteSpace=wrap;html=1;fillColor=#7C3AED;strokeColor=#7C3AED;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="870" y="220" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e23" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-sup" target="sa3" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="sa4" value="Platform-wide Oversight" style="ellipse;whiteSpace=wrap;html=1;fillColor=#7C3AED;strokeColor=#7C3AED;fontSize=10;" vertex="1" parent="1" fontColor="#ffffff">
+          <mxGeometry x="870" y="270" width="170" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="e24" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;" edge="1" source="act-sup" target="sa4" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

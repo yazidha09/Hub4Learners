@@ -472,14 +472,28 @@ async def enroll(
     course = db.query(Course).filter(Course.id == UUID(course_id)).first()
     student = db.query(User).filter(User.id == UUID(current_user["sub"])).first()
     if course and student:
-        await notification_controller.push(
-            user_id=str(course.professor_id),
-            type="enrollment",
-            title="New Enrollment",
-            body=f"{student.full_name} enrolled in your course \"{course.title}\"",
-            db=db,
-            meta={"course_id": course_id, "student_id": current_user["sub"]},
-        )
+        try:
+            await notification_controller.push(
+                user_id=str(course.professor_id),
+                type="enrollment",
+                title="New Enrollment",
+                body=f"{student.full_name} enrolled in your course \"{course.title}\"",
+                db=db,
+                meta={"course_id": course_id, "student_id": current_user["sub"]},
+            )
+        except Exception:
+            pass
+        try:
+            await notification_controller.push(
+                user_id=current_user["sub"],
+                type="enrollment_confirmed",
+                title="Enrollment Successful",
+                body=f"You enrolled in \"{course.title}\"",
+                db=db,
+                meta={"course_id": course_id},
+            )
+        except Exception:
+            pass
     return enrollment
 
 

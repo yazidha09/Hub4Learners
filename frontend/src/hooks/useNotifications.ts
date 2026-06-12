@@ -13,6 +13,7 @@ export type NotificationType =
   | 'friend_request_reviewed'
   | 'friend_message'
   | 'enrollment'
+  | 'enrollment_confirmed'
   | 'role_changed'
 
 export interface AppNotification {
@@ -39,7 +40,11 @@ function fromData(d: NotificationData): AppNotification {
   }
 }
 
-export function useNotifications(userId: string | undefined, token: string | null) {
+export function useNotifications(
+  userId: string | undefined,
+  token: string | null,
+  onNotification?: (notif: AppNotification) => void,
+) {
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -72,6 +77,7 @@ export function useNotifications(userId: string | undefined, token: string | nul
             if (prev.some(n => n.id === notif.id)) return prev
             return [notif, ...prev].slice(0, 100)
           })
+          onNotification?.(notif)
         } catch {}
       }
 
