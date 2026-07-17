@@ -1,7 +1,11 @@
+import os
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-DATABASE_URL ="postgresql+psycopg2://neondb_owner:npg_0BjPbNUm8rJW@ep-green-violet-alh73vqs-pooler.c-3.eu-central-1.aws.neon.tech/neondb?sslmode=require"
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not set. Add it to backend/.env")
 
 engine = create_engine(
     DATABASE_URL,
